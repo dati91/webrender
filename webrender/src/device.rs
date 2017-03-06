@@ -31,6 +31,19 @@ use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
 
+gfx_defines! {
+    vertex Vertex {
+        pos: [f32; 2] = "aPosition",
+        color: [f32; 3] = "aColor",
+    }
+
+    pipeline pipe {
+        vbuf: gfx::VertexBuffer<Vertex> = (),
+        out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
+        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureTarget {
     Default,
@@ -96,34 +109,89 @@ pub enum ShaderError {
 }
 
 pub struct Device {
-    gfx_device: device_gl::Device,
-    gfx_factory: device_gl::Factory,
-    gfx_encoder: gfx::Encoder<R,CB>,
-    //gfx_data: pipe::Data<R>,
-    //gfx_pso: gfx::PipelineState<R, pipe::Meta>,
-    //gfx_slice: gfx::Slice<R>,
+    device: device_gl::Device,
+    factory: device_gl::Factory,
+    encoder: gfx::Encoder<R,CB>,
+    pso: gfx::PipelineState<R, pipe::Meta>,
+    data: pipe::Data<R>,
+    slice: gfx::Slice<R>,
     max_texture_size: u32,
 }
 
 impl Device {
     pub fn new(window: &glutin::Window) -> Device {
-        let (mut device, mut factory, color_view, ds_view) =
+        let (mut device, mut factory, main_color, main_depth) =
             gfx_window_glutin::init_existing::<ColorFormat, DepthFormat>(window);
         println!("Vendor: {:?}", device.get_info().platform_name.vendor);
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
         println!("Shading Language: {:?}", device.get_info().shading_language);
         let encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
+        let pso = factory.create_pipeline_simple(
+            include_bytes!("../res/v.glsl"),
+            include_bytes!("../res/f.glsl"),
+            pipe::new()
+        ).unwrap();
+
+        let x0 = -1.0;
+        let y0 = -1.0;
+        let x1 = 1.0;
+        let y1 = 1.0;
+
+        let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
+        let quad_vertices = [
+            Vertex {
+                pos: [x0, y0], color: [1.0, 0.0, 0.0]
+            },
+            Vertex {
+                pos: [x1, y0], color: [0.0, 1.0, 0.0]
+            },
+            Vertex {
+                pos: [x0, y1], color: [0.0, 0.0, 1.0]
+            },
+            Vertex {
+                pos: [x1, y1], color: [1.0, 1.0, 1.0]
+            },
+        ];
+
+        let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+        let data = pipe::Data {
+            vbuf: vertex_buffer,
+            out_color: main_color,
+            out_depth: main_depth,
+        };
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
         Device {
-            gfx_device: device,
-            gfx_factory: factory,
-            gfx_encoder: encoder,
+            device: device,
+            factory: factory,
+            encoder: encoder,
+            pso: pso,
+            data: data,
+            slice: slice,
             max_texture_size: max_texture_size,
         }
     }
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
+    }
+
+    pub fn clear_target(&mut self,
+                        color: Option<[f32; 4]>,
+                        depth: Option<f32>) {
+        if let Some(color) = color {
+            println!("clear:{:?}", color);
+            self.encoder.clear(&self.data.out_color, color);
+        }
+
+        if let Some(depth) = depth {
+            self.encoder.clear_depth(&self.data.out_depth, depth);
+        }
+    }
+
+    pub fn draw(&mut self) {
+        println!("draw!");
+        self.encoder.draw(&self.slice, &self.pso, &self.data);
+        self.encoder.flush(&mut self.device);
     }
 }

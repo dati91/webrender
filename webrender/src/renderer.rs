@@ -347,12 +347,24 @@ impl Renderer {
         if let Some(mut frame) = self.current_frame.take() {
             if let Some(ref mut frame) = frame.frame {
                 //println!("frame!");
+                println!("{:?}", frame.background_color);
+                self.device.clear_target(Some(frame.background_color.unwrap().to_array()), Some(1.0));
+                self.device.draw();
             }
 
             // Restore frame - avoid borrow checker!
             self.current_frame = Some(frame);
         } else {
             println!("no frame!");
+        }
+    }
+
+    fn draw_tile_frame(&mut self,
+                       frame: &mut Frame,
+                       framebuffer_size: &DeviceUintSize) {
+        if frame.passes.is_empty() {
+            println!("empty!");
+            self.device.clear_target(Some(self.clear_color.to_array()), Some(1.0));
         }
     }
 }
