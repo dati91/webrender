@@ -7,7 +7,7 @@ use fnv::FnvHasher;
 use freelist::{FreeList, FreeListItem, FreeListItemId};
 use internal_types::{TextureUpdate, TextureUpdateOp};
 use internal_types::{CacheTextureId, RenderTargetMode, TextureUpdateList, RectUv};
-use profiler::TextureCacheProfileCounters;
+//use profiler::TextureCacheProfileCounters;
 use std::cmp::{self, Ordering};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -577,8 +577,8 @@ impl TextureCache {
                     requested_width: u32,
                     requested_height: u32,
                     format: ImageFormat,
-                    filter: TextureFilter,
-                    profile: &mut TextureCacheProfileCounters)
+                    filter: TextureFilter/*,
+                    profile: &mut TextureCacheProfileCounters*/)
                     -> AllocationResult {
         let requested_size = DeviceUintSize::new(requested_width, requested_height);
 
@@ -603,10 +603,16 @@ impl TextureCache {
         }
 
         let mode = RenderTargetMode::SimpleRenderTarget;
-        let (page_list, page_profile) = match format {
+        /*let (page_list, page_profile) = match format {
             ImageFormat::A8 => (&mut self.arena.pages_a8, &mut profile.pages_a8),
             ImageFormat::RGBA8 => (&mut self.arena.pages_rgba8, &mut profile.pages_rgba8),
             ImageFormat::RGB8 => (&mut self.arena.pages_rgb8, &mut profile.pages_rgb8),
+            ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
+        };*/
+        let page_list = match format {
+            ImageFormat::A8 => &mut self.arena.pages_a8,
+            ImageFormat::RGBA8 => &mut self.arena.pages_rgba8,
+            ImageFormat::RGB8 => &mut self.arena.pages_rgb8,
             ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
         };
 
@@ -637,7 +643,7 @@ impl TextureCache {
 
                 let extra_texels = new_width * new_height - page.texture_size.width * page.texture_size.height;
                 let extra_bytes = extra_texels * format.bytes_per_pixel().unwrap_or(0);
-                page_profile.inc(extra_bytes as usize);
+                //page_profile.inc(extra_bytes as usize);
 
                 page.grow(texture_size);
 
@@ -661,7 +667,7 @@ impl TextureCache {
                 let texture_size = DeviceUintSize::new(cmp::max(requested_width, init_texture_size.width),
                                                        cmp::max(requested_height, init_texture_size.height));
                 let extra_bytes = texture_size.width * texture_size.height * format.bytes_per_pixel().unwrap_or(0);
-                page_profile.inc(extra_bytes as usize);
+                //page_profile.inc(extra_bytes as usize);
 
                 let free_texture_levels_entry = self.free_texture_levels.entry(format);
                 let mut free_texture_levels = match free_texture_levels_entry {
@@ -745,8 +751,8 @@ impl TextureCache {
                   image_id: TextureCacheItemId,
                   descriptor: ImageDescriptor,
                   filter: TextureFilter,
-                  data: ImageData,
-                  profile: &mut TextureCacheProfileCounters) {
+                  data: ImageData/*,
+                  profile: &mut TextureCacheProfileCounters*/) {
         if let ImageData::Blob(..) = data {
             panic!("must rasterize the vector image before adding to the cache");
         }
@@ -760,8 +766,8 @@ impl TextureCache {
                                    width,
                                    height,
                                    format,
-                                   filter,
-                                   profile);
+                                   filter/*,
+                                   profile*/);
 
         match result.kind {
             AllocationKind::TexturePage => {

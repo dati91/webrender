@@ -14,7 +14,7 @@ use prim_store::{ImagePrimitiveKind, PrimitiveContainer, PrimitiveGeometry, Prim
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu, RadialGradientPrimitiveGpu};
 use prim_store::{RectanglePrimitive, TextRunPrimitiveCpu, TextRunPrimitiveGpu};
 use prim_store::{TexelRect, YuvImagePrimitiveCpu, YuvImagePrimitiveGpu};
-use profiler::{FrameProfileCounters, TextureCacheProfileCounters};
+//use profiler::{FrameProfileCounters, TextureCacheProfileCounters};
 use render_task::{AlphaRenderItem, MaskCacheKey, MaskResult, RenderTask, RenderTaskIndex};
 use render_task::RenderTaskLocation;
 use resource_cache::ResourceCache;
@@ -892,7 +892,7 @@ impl FrameBuilder {
                                                 clip_scroll_tree: &ClipScrollTree,
                                                 auxiliary_lists_map: &AuxiliaryListsMap,
                                                 resource_cache: &mut ResourceCache,
-                                                profile_counters: &mut FrameProfileCounters,
+                                                //profile_counters: &mut FrameProfileCounters,
                                                 device_pixel_ratio: f32) {
         profile_scope!("cull");
         LayerRectCalculationAndCullingPass::create_and_run(self,
@@ -900,7 +900,7 @@ impl FrameBuilder {
                                                            clip_scroll_tree,
                                                            auxiliary_lists_map,
                                                            resource_cache,
-                                                           profile_counters,
+                                                           //profile_counters,
                                                            device_pixel_ratio);
     }
 
@@ -1093,12 +1093,12 @@ impl FrameBuilder {
                  clip_scroll_tree: &ClipScrollTree,
                  auxiliary_lists_map: &AuxiliaryListsMap,
                  device_pixel_ratio: f32,
-                 texture_cache_profile: &mut TextureCacheProfileCounters)
+             /*texture_cache_profile: &mut TextureCacheProfileCounters*/)
                  -> Frame {
         profile_scope!("build");
 
-        let mut profile_counters = FrameProfileCounters::new();
-        profile_counters.total_primitives.set(self.prim_store.prim_count());
+        //let mut profile_counters = FrameProfileCounters::new();
+        //profile_counters.total_primitives.set(self.prim_store.prim_count());
 
         resource_cache.begin_frame(frame_id);
 
@@ -1122,7 +1122,7 @@ impl FrameBuilder {
                                                       clip_scroll_tree,
                                                       auxiliary_lists_map,
                                                       resource_cache,
-                                                      &mut profile_counters,
+                                                      //&mut profile_counters,
                                                       device_pixel_ratio);
 
         let (main_render_task, static_render_task_count) = self.build_render_task();
@@ -1131,7 +1131,7 @@ impl FrameBuilder {
         let mut required_pass_count = 0;
         main_render_task.max_depth(0, &mut required_pass_count);
 
-        resource_cache.block_until_all_resources_added(texture_cache_profile);
+        resource_cache.block_until_all_resources_added(/*texture_cache_profile*/);
 
         for scroll_layer in self.scroll_layer_store.iter() {
             if let Some(ref clip_info) = scroll_layer.clip_cache_info {
@@ -1164,8 +1164,8 @@ impl FrameBuilder {
 
             pass.build(&ctx, &mut render_tasks);
 
-            profile_counters.passes.inc();
-            profile_counters.targets.add(pass.targets.len());
+            //profile_counters.passes.inc();
+            //profile_counters.targets.add(pass.targets.len());
         }
 
         resource_cache.end_frame();
@@ -1174,7 +1174,7 @@ impl FrameBuilder {
             device_pixel_ratio: device_pixel_ratio,
             background_color: self.background_color,
             viewport_size: self.screen_rect.size,
-            profile_counters: profile_counters,
+            //profile_counters: profile_counters,
             passes: passes,
             cache_size: cache_size,
             layer_texture_data: self.packed_layers.clone(),
@@ -1198,7 +1198,7 @@ struct LayerRectCalculationAndCullingPass<'a> {
     clip_scroll_tree: &'a ClipScrollTree,
     auxiliary_lists_map: &'a AuxiliaryListsMap,
     resource_cache: &'a mut ResourceCache,
-    profile_counters: &'a mut FrameProfileCounters,
+    //profile_counters: &'a mut FrameProfileCounters,
     device_pixel_ratio: f32,
     stacking_context_stack: Vec<StackingContextIndex>,
     scroll_layer_stack: Vec<ScrollLayerIndex>,
@@ -1218,7 +1218,7 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                       clip_scroll_tree: &'a ClipScrollTree,
                       auxiliary_lists_map: &'a AuxiliaryListsMap,
                       resource_cache: &'a mut ResourceCache,
-                      profile_counters: &'a mut FrameProfileCounters,
+                      //profile_counters: &'a mut FrameProfileCounters,
                       device_pixel_ratio: f32) {
 
         let mut pass = LayerRectCalculationAndCullingPass {
@@ -1227,7 +1227,7 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
             clip_scroll_tree: clip_scroll_tree,
             auxiliary_lists_map: auxiliary_lists_map,
             resource_cache: resource_cache,
-            profile_counters: profile_counters,
+            //profile_counters: profile_counters,
             device_pixel_ratio: device_pixel_ratio,
             stacking_context_stack: Vec::new(),
             scroll_layer_stack: Vec::new(),
@@ -1511,9 +1511,9 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                     self.current_clip_stack.pop();
                 }
 
-                if visible {
+                /*if visible {
                     self.profile_counters.visible_primitives.inc();
-                }
+                }*/
             }
         }
     }

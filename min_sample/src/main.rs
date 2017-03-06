@@ -24,14 +24,6 @@ use webrender_traits::{ImageDescriptor, ImageData, ImageFormat, PipelineId};
 use webrender_traits::{ImageKey, BlobImageData, BlobImageRenderer, RasterizedBlobImage};
 use webrender_traits::{LayoutSize, LayoutPoint, LayoutRect, LayoutTransform, DeviceUintSize};
 
-
-fn load_file(name: &str) -> Vec<u8> {
-    let mut file = File::open(name).unwrap();
-    let mut buffer = vec![];
-    file.read_to_end(&mut buffer).unwrap();
-    buffer
-}
-
 struct Notifier {
     window_proxy: glutin::WindowProxy,
 }
@@ -65,19 +57,13 @@ fn main() {
     };
 
     let window = glutin::WindowBuilder::new()
-                .with_title("WebRender Sample")
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0)
-                })
+                .with_title("WebRender Min Sample")
                 .build()
                 .unwrap();
 
     unsafe {
         window.make_current().ok();
     }
-    // Android uses the static generator (as opposed to a global generator) at the moment
-    #[cfg(not(target_os = "android"))]
     gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
 
     println!("OpenGL version {}", gl::get_string(gl::VERSION));
@@ -88,8 +74,8 @@ fn main() {
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
         debug: true,
-        precache_shaders: true,
-        blob_image_renderer: Some(Box::new(FakeBlobImageRenderer::new())),
+        //precache_shaders: true,
+        //blob_image_renderer: Some(Box::new(FakeBlobImageRenderer::new())),
         .. Default::default()
     };
 
@@ -102,13 +88,13 @@ fn main() {
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
 
-    let vector_img = api.generate_image_key();
+    /*let vector_img = api.generate_image_key();
     api.add_image(
         vector_img,
         ImageDescriptor::new(100, 100, ImageFormat::RGBA8, true),
         ImageData::new_blob_image(Vec::new()),
         None,
-    );
+    );*/
 
     let pipeline_id = PipelineId(0, 0);
     let mut builder = webrender_traits::DisplayListBuilder::new(pipeline_id);
@@ -116,7 +102,7 @@ fn main() {
     let bounds = LayoutRect::new(LayoutPoint::new(0.0, 0.0), LayoutSize::new(width as f32, height as f32));
     let clip_region = {
         let complex = webrender_traits::ComplexClipRegion::new(
-            LayoutRect::new(LayoutPoint::new(50.0, 50.0), LayoutSize::new(100.0, 100.0)),
+            LayoutRect::new(LayoutPoint::new(0.0, 0.0), LayoutSize::new(width as f32, height as f32)),
             webrender_traits::BorderRadius::uniform(20.0));
 
         builder.new_clip_region(&bounds, vec![complex], None)
@@ -130,14 +116,14 @@ fn main() {
                                   LayoutTransform::identity(),
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
-    builder.push_image(
-        LayoutRect::new(LayoutPoint::new(0.0, 0.0), LayoutSize::new(100.0, 100.0)),
+    /*builder.push_image(
+        LayoutRect::new(LayoutPoint::new(0.0, 0.0), LayoutSize::new(300.0, 300.0)),
         ClipRegion::simple(&bounds),
         LayoutSize::new(100.0, 100.0),
         LayoutSize::new(0.0, 0.0),
         ImageRendering::Auto,
         vector_img,
-    );
+    );*/
 
     let sub_clip = {
         let mask_image = api.generate_image_key();
@@ -147,25 +133,26 @@ fn main() {
             ImageData::new(vec![0, 80, 180, 255]),
             None,
         );
-        let mask = webrender_traits::ImageMask {
+        /*let mask = webrender_traits::ImageMask {
             image: mask_image,
             rect: LayoutRect::new(LayoutPoint::new(75.0, 75.0), LayoutSize::new(100.0, 100.0)),
             repeat: false,
-        };
+        };*/
         let complex = webrender_traits::ComplexClipRegion::new(
             LayoutRect::new(LayoutPoint::new(50.0, 50.0), LayoutSize::new(100.0, 100.0)),
             webrender_traits::BorderRadius::uniform(20.0));
 
-        builder.new_clip_region(&bounds, vec![complex], Some(mask))
+        //builder.new_clip_region(&bounds, vec![complex], Some(mask))
+        builder.new_clip_region(&bounds, vec![complex], None)
     };
 
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       sub_clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
-    builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
+    /*builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       sub_clip,
-                      ColorF::new(0.0, 1.0, 0.0, 1.0));
-    let border_side = webrender_traits::BorderSide {
+                      ColorF::new(0.0, 1.0, 0.0, 1.0));*/
+    /*let border_side = webrender_traits::BorderSide {
         color: ColorF::new(0.0, 0.0, 1.0, 1.0),
         style: webrender_traits::BorderStyle::Groove,
     };
@@ -185,78 +172,10 @@ fn main() {
     builder.push_border(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                         sub_clip,
                         border_widths,
-                        border_details);
+                        border_details);*/
 
 
-    if false { // draw text?
-        let font_key = api.generate_font_key();
-        let font_bytes = load_file("res/FreeSans.ttf");
-        api.add_raw_font(font_key, font_bytes);
-
-        let text_bounds = LayoutRect::new(LayoutPoint::new(100.0, 200.0), LayoutSize::new(700.0, 300.0));
-
-        let glyphs = vec![
-            GlyphInstance {
-                index: 48,
-                point: Point2D::new(100.0, 100.0),
-            },
-            GlyphInstance {
-                index: 68,
-                point: Point2D::new(150.0, 100.0),
-            },
-            GlyphInstance {
-                index: 80,
-                point: Point2D::new(200.0, 100.0),
-            },
-            GlyphInstance {
-                index: 82,
-                point: Point2D::new(250.0, 100.0),
-            },
-            GlyphInstance {
-                index: 81,
-                point: Point2D::new(300.0, 100.0),
-            },
-            GlyphInstance {
-                index: 3,
-                point: Point2D::new(350.0, 100.0),
-            },
-            GlyphInstance {
-                index: 86,
-                point: Point2D::new(400.0, 100.0),
-            },
-            GlyphInstance {
-                index: 79,
-                point: Point2D::new(450.0, 100.0),
-            },
-            GlyphInstance {
-                index: 72,
-                point: Point2D::new(500.0, 100.0),
-            },
-            GlyphInstance {
-                index: 83,
-                point: Point2D::new(550.0, 100.0),
-            },
-            GlyphInstance {
-                index: 87,
-                point: Point2D::new(600.0, 100.0),
-            },
-            GlyphInstance {
-                index: 17,
-                point: Point2D::new(650.0, 100.0),
-            },
-        ];
-
-        builder.push_text(text_bounds,
-                          webrender_traits::ClipRegion::simple(&bounds),
-                          glyphs,
-                          font_key,
-                          ColorF::new(1.0, 1.0, 0.0, 1.0),
-                          Au::from_px(32),
-                          Au::from_px(0),
-                          None);
-    }
-
-    builder.pop_stacking_context();
+    //builder.pop_stacking_context();
 
     api.set_root_display_list(
         Some(root_background_color),
@@ -280,10 +199,11 @@ fn main() {
             glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Q)) => break,
             _ => ()
         }
+        //println!("update!");
     }
 }
 
-struct FakeBlobImageRenderer {
+/*struct FakeBlobImageRenderer {
     images: HashMap<ImageKey, BlobImageResult>,
 }
 
@@ -333,4 +253,4 @@ impl BlobImageRenderer for FakeBlobImageRenderer {
     fn resolve_blob_image(&mut self, key: ImageKey) -> BlobImageResult {
         self.images.remove(&key).unwrap_or(Err(BlobImageError::InvalidKey))
     }
-}
+}*/

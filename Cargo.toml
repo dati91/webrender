@@ -3,6 +3,7 @@ members = [
     "webrender",
     "webrender_traits",
     "sample",
+    "min_sample",
     "wrench",
 ]
 

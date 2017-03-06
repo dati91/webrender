@@ -11,7 +11,7 @@ use mask_cache::{ClipSource, MaskCacheInfo};
 use prim_store::{CLIP_DATA_GPU_SIZE, DeferredResolve, GpuBlock128, GpuBlock16, GpuBlock32};
 use prim_store::{GpuBlock64, GradientData, PrimitiveCacheKey, PrimitiveGeometry, PrimitiveIndex};
 use prim_store::{PrimitiveKind, PrimitiveMetadata, PrimitiveStore, TexelRect};
-use profiler::FrameProfileCounters;
+//use profiler::FrameProfileCounters;
 use render_task::{AlphaRenderItem, MaskGeometryKind, MaskSegment, RenderTask, RenderTaskData};
 use render_task::{RenderTaskId, RenderTaskIndex, RenderTaskKey, RenderTaskKind};
 use render_task::RenderTaskLocation;
@@ -1442,7 +1442,7 @@ pub struct Frame {
     pub device_pixel_ratio: f32,
     pub cache_size: DeviceUintSize,
     pub passes: Vec<RenderPass>,
-    pub profile_counters: FrameProfileCounters,
+    //pub profile_counters: FrameProfileCounters,
 
     pub layer_texture_data: Vec<PackedLayer>,
     pub render_task_data: Vec<RenderTaskData>,
@@ -1460,4 +1460,3 @@ pub struct Frame {
     // patch the data structures.
     pub deferred_resolves: Vec<DeferredResolve>,
 }
-

@@ -10,7 +10,7 @@ use offscreen_gl_context::{NativeGLContext, NativeGLContextHandle};
 use offscreen_gl_context::{GLContext, NativeGLContextMethods, GLContextDispatcher};
 use offscreen_gl_context::{OSMesaContext, OSMesaContextHandle};
 use offscreen_gl_context::{ColorAttachmentType, GLContextAttributes, GLLimits};
-use profiler::BackendProfileCounters;
+//use profiler::BackendProfileCounters;
 use std::collections::{HashMap, HashSet};
 use std::f32;
 use std::hash::BuildHasherDefault;
@@ -455,7 +455,7 @@ impl RendererFrame {
 
 pub enum ResultMsg {
     RefreshShader(PathBuf),
-    NewFrame(RendererFrame, TextureUpdateList, ExternalImageUpdateList, BackendProfileCounters),
+    NewFrame(RendererFrame, TextureUpdateList, ExternalImageUpdateList/*, BackendProfileCounters*/),
 }
 
 #[repr(u32)]

@@ -10,7 +10,7 @@ use internal_types::{RendererFrame};
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use clip_scroll_node::ClipScrollNode;
 use clip_scroll_tree::{ClipScrollTree, ScrollStates};
-use profiler::TextureCacheProfileCounters;
+//use profiler::TextureCacheProfileCounters;
 use resource_cache::ResourceCache;
 use scene::{Scene, SceneProperties};
 use std::collections::HashMap;
@@ -848,13 +848,13 @@ impl Frame {
                  resource_cache: &mut ResourceCache,
                  auxiliary_lists_map: &AuxiliaryListsMap,
                  device_pixel_ratio: f32,
-                 texture_cache_profile: &mut TextureCacheProfileCounters)
+             /*texture_cache_profile: &mut TextureCacheProfileCounters*/)
                  -> RendererFrame {
         self.clip_scroll_tree.update_all_node_transforms();
         let frame = self.build_frame(resource_cache,
                                      auxiliary_lists_map,
                                      device_pixel_ratio,
-                                     texture_cache_profile);
+                                 /*texture_cache_profile*/);
         resource_cache.expire_old_resources(self.id);
         frame
     }
@@ -863,7 +863,7 @@ impl Frame {
                    resource_cache: &mut ResourceCache,
                    auxiliary_lists_map: &AuxiliaryListsMap,
                    device_pixel_ratio: f32,
-                   texture_cache_profile: &mut TextureCacheProfileCounters)
+               /*texture_cache_profile: &mut TextureCacheProfileCounters*/)
                    -> RendererFrame {
         let mut frame_builder = self.frame_builder.take();
         let frame = frame_builder.as_mut().map(|builder|
@@ -872,7 +872,7 @@ impl Frame {
                           &self.clip_scroll_tree,
                           auxiliary_lists_map,
                           device_pixel_ratio,
-                          texture_cache_profile)
+                      /*texture_cache_profile*/)
         );
         self.frame_builder = frame_builder;
 
