@@ -133,6 +133,12 @@ impl Device {
             pipe::new()
         ).unwrap();
 
+        /*let pso2 = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.fs.glsl")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vs.glsl")),
+            pipe::new()
+        ).unwrap();*/
+
         let x0 = -1.0;
         let y0 = -1.0;
         let x1 = 1.0;

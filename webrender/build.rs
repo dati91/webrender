@@ -2,10 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use std::collections::HashMap;
 use std::env;
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::io::prelude::*;
 use std::fs::{canonicalize, read_dir, File};
+
+#[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
+const SHADER_VERSION: &'static str = "#version 150\n";
+
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+const SHADER_VERSION: &'static str = "#version 300 es\n";
+
+static SHADER_PREAMBLE: &'static str = "shared";
 
 fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) {
     let mut shader_file = File::create(shader_file_path).unwrap();
@@ -27,9 +37,128 @@ fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) {
         write!(shader_file, "    h.insert(\"{}\", include_str!(\"{}\"));\n",
                shader_name, full_name).unwrap();
     }
-    write!(shader_file, "    h\n").unwrap(); 
-    write!(shader_file, "  }};\n").unwrap(); 
-    write!(shader_file, "}}\n").unwrap(); 
+    write!(shader_file, "    h\n").unwrap();
+    write!(shader_file, "  }};\n").unwrap();
+    write!(shader_file, "}}\n").unwrap();
+}
+
+fn gen_shaders(glsl_files: Vec<PathBuf>) -> HashMap<String, String> {
+    let mut shaders: HashMap<String, String> = HashMap::with_capacity(glsl_files.len());
+
+    for glsl in glsl_files {
+        let shader_name = glsl.file_name().unwrap().to_str().unwrap();
+        // strip .glsl
+        let shader_name = shader_name.replace(".glsl", "");
+        let full_path = canonicalize(&glsl).unwrap();
+        let full_name = full_path.as_os_str().to_str().unwrap();
+        // if someone is building on a network share, I'm sorry.
+        let full_name = full_name.replace("\\\\?\\", "");
+        let full_name = full_name.replace("\\", "/");
+        shaders.insert(shader_name, full_name);
+    }
+    shaders
+}
+
+fn get_optional_shader_source(shaders: &HashMap<String, String>, shader_name: &String) -> Option<String> {
+    if let Some(shader_file) = shaders.get(shader_name).and_then(|s| Some((*s).to_owned())) {
+        let shared_file_path = Path::new(&shader_file);
+        let mut shader_source_file = File::open(shared_file_path).unwrap();
+        let mut s = String::new();
+        shader_source_file.read_to_string(&mut s).unwrap();
+        return Some(s.clone());
+    }
+
+    None
+}
+
+fn get_shader_source(shaders: &HashMap<String, String>, shader_name: &String) -> String {
+     get_optional_shader_source(shaders, shader_name)
+        .expect(&format!("Couldn't get required shader: {}", shader_name))
+}
+
+fn create_shader(shaders: &HashMap<String, String>, shader_name: String, out_dir: &String) {
+    //let shader_file_path = Path::new(&out_dir).join(&format!("{}.glsl", shader_name));
+    //let mut shader_file = File::create(shader_file_path).unwrap();
+
+    create_prim_shader(&shaders, &shader_name, &[]);
+}
+
+fn create_prim_shader(shaders: &HashMap<String, String>,
+                      name: &String,
+                      features: &[&'static str]) {
+    let mut prefix = format!("#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n", 1024);
+
+    for feature in features {
+        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
+    }
+
+    let includes = &["prim_shared".to_owned()];
+    create_program_with_prefix(shaders, &name.to_owned(), includes, Some(prefix))
+}
+
+fn create_program_with_prefix(shaders: &HashMap<String, String>,
+                              base_filename: &String,
+                              include_filenames: &[String],
+                              prefix: Option<String>) {
+    let mut vs_name = base_filename.clone();
+    vs_name.push_str(".vs");
+    let mut fs_name = base_filename.clone();
+    fs_name.push_str(".fs");
+
+    let mut include = format!("\n// Base shader: {}\n", base_filename);
+    for inc_filename in include_filenames {
+        let src = get_shader_source(shaders, inc_filename);
+        include.push_str(&src);
+    }
+
+    if let Some(shared_src) = get_optional_shader_source(shaders, base_filename) {
+        include.push_str(&shared_src.to_owned());
+    }
+
+    let mut vs_preamble = Vec::new();
+    let mut fs_preamble = Vec::new();
+
+    vs_preamble.push("#define WR_VERTEX_SHADER\n".to_owned());
+    fs_preamble.push("#define WR_FRAGMENT_SHADER\n".to_owned());
+
+    if let Some(ref prefix) = prefix {
+        vs_preamble.push(prefix.clone());
+        fs_preamble.push(prefix.clone());
+    }
+
+    let shader_preamble = get_shader_source(shaders, &SHADER_PREAMBLE.to_owned());
+
+    vs_preamble.push(shader_preamble.to_owned());
+    fs_preamble.push(shader_preamble.to_owned());
+
+    vs_preamble.push(include.clone());
+    fs_preamble.push(include);
+
+    let mut vs = String::new();
+    vs.push_str(SHADER_VERSION);
+    for prefix in vs_preamble {
+        vs.push_str(&prefix);
+    }
+    let vs_source = get_shader_source(shaders, &vs_name);
+    vs.push_str(vs_source.as_str());
+
+    let mut fs = String::new();
+    fs.push_str(SHADER_VERSION);
+    for prefix in fs_preamble {
+        fs.push_str(&prefix);
+    }
+    let fs_source = get_shader_source(shaders, &fs_name);
+    fs.push_str(fs_source.as_str());
+
+    let out_dir = env::var("OUT_DIR").unwrap_or("out".to_owned());
+
+    let vs_file_path = Path::new(&out_dir).join(format!("{}.vs.glsl", base_filename));
+    let mut vs_file = File::create(vs_file_path).unwrap();
+    write!(vs_file, "{}", vs).unwrap();
+
+    let fs_file_path = Path::new(&out_dir).join(format!("{}.fs.glsl", base_filename));
+    let mut fs_file = File::create(fs_file_path).unwrap();
+    write!(fs_file, "{}", fs).unwrap();
 }
 
 fn main() {
@@ -50,5 +179,9 @@ fn main() {
         }
     }
 
-    write_shaders(glsl_files, &shaders_file);
+    write_shaders(glsl_files.clone(), &shaders_file);
+
+    let shaders = gen_shaders(glsl_files);
+
+    create_shader(&shaders, "ps_rectangle".to_owned(), &out_dir);
 }
