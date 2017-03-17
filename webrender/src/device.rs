@@ -42,6 +42,39 @@ gfx_defines! {
         out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
+
+    vertex PrimitiveVertex {
+        pos: [f32; 3] = "aPosition",
+        glob_prim_id: i32 = "aGlobalPrimId",
+        primitive_address: i32 = "aPrimitiveAddress",
+        task_index: i32 = "aTaskIndex",
+        clip_task_index: i32 = "aClipTaskIndex",
+        layer_index: i32 = "aLayerIndex",
+        element_index: i32 = "aElementIndex",
+        user_data: [i32; 2] = "aUserData",
+        z_index: i32 = "aZIndex",
+    }
+
+    pipeline primitive {
+        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
+        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
+        vbuf: gfx::VertexBuffer<PrimitiveVertex> = (),
+        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+        color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
+        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
+        mask: gfx::TextureSampler<[f32; 4]> = "sMask",
+        cache: gfx::TextureSampler<f32> = "sCache",
+        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
+        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
+        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
+        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
+        data32: gfx::TextureSampler<[f32; 4]> = "sData32",
+        data64: gfx::TextureSampler<[f32; 4]> = "sData64",
+        data128: gfx::TextureSampler<[f32; 4]> = "sData128",
+        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
+        out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
+        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -133,11 +166,11 @@ impl Device {
             pipe::new()
         ).unwrap();
 
-        /*let pso2 = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.fs.glsl")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vs.glsl")),
-            pipe::new()
-        ).unwrap();*/
+        let ps_rectangle_pso = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.vs.glsl")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.fs.glsl")),
+            primitive::new()
+        ).unwrap();
 
         let x0 = -1.0;
         let y0 = -1.0;
@@ -166,6 +199,33 @@ impl Device {
             out_color: main_color,
             out_depth: main_depth,
         };
+
+        //let sampler = factory.create_sampler_linear();
+
+        /*let data = pipe::Data {
+            transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
+            device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
+            vbuf: vertex_buffer,
+
+            color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+            color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
+            color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
+            mask: gfx::TextureSampler<[f32; 4]> = "sMask",
+            cache: gfx::TextureSampler<f32> = "sCache",
+            layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
+            render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
+            prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
+            data16: gfx::TextureSampler<[f32; 4]> = "sData16",
+            data32: gfx::TextureSampler<[f32; 4]> = "sData32",
+            data64: gfx::TextureSampler<[f32; 4]> = "sData64",
+            data128: gfx::TextureSampler<[f32; 4]> = "sData128",
+            resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
+
+
+            out_color: main_color,
+            out_depth: main_depth,
+        };*/
+
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
         Device {
             device: device,
