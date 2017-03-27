@@ -55,6 +55,8 @@ extern crate glutin;
 #[macro_use]
 extern crate gfx;
 extern crate gfx_window_glutin;
+#[macro_use]
+extern crate gfx_core;
 extern crate gfx_device_gl;
 
 mod batch_builder;

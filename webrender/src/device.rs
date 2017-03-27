@@ -25,11 +25,17 @@ use webrender_traits::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintS
 use glutin;
 use gfx;
 use gfx::Factory;
+use gfx::texture;
 use gfx::traits::FactoryExt;
 use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
+use gfx::CombinedError;
+use gfx::format::R8_G8_B8_A8;
+use gfx::format::Rgba8;
+use gfx::memory::{Usage, SHADER_RESOURCE};
+use gfx::format::ChannelType::Unorm;
 
 gfx_defines! {
     vertex Vertex {
@@ -41,6 +47,19 @@ gfx_defines! {
         vbuf: gfx::VertexBuffer<Vertex> = (),
         out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+    }
+
+    vertex V2 {
+        pos: [f32; 2] = "a_Pos",
+        tex_coord: [f32; 2] = "a_TexCoord",
+    }
+
+    pipeline p2 {
+        vbuf: gfx::VertexBuffer<V2> = (),
+        color: gfx::TextureSampler<[f32; 4]> = "t_Color",
+        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
+        out_depth: gfx::DepthTarget<DepthFormat> =
+            gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 
     vertex PrimitiveVertex {
@@ -145,9 +164,12 @@ pub struct Device {
     device: device_gl::Device,
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
-    pso: gfx::PipelineState<R, pipe::Meta>,
-    data: pipe::Data<R>,
+    pso: gfx::PipelineState<R, p2::Meta>,
+    data: p2::Data<R>,
     slice: gfx::Slice<R>,
+    main_surface: gfx::handle::Texture<R, R8_G8_B8_A8>,
+    main_view: gfx::handle::ShaderResourceView<R, [f32; 4]>,
+    texels: Vec<u8>,
     max_texture_size: u32,
 }
 
@@ -159,17 +181,20 @@ impl Device {
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
         println!("Shading Language: {:?}", device.get_info().shading_language);
-        let encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
-        let pso = factory.create_pipeline_simple(
-            include_bytes!("../res/v.glsl"),
-            include_bytes!("../res/f.glsl"),
-            pipe::new()
-        ).unwrap();
+        let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
+        //let max_texture_size = factory.get_capabilities().max_texture_size as u32;
+        let max_texture_size = 256;
 
-        let ps_rectangle_pso = factory.create_pipeline_simple(
+        /*let ps_rectangle_pso = factory.create_pipeline_simple(
             include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.vs.glsl")),
             include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.fs.glsl")),
             primitive::new()
+        ).unwrap();*/
+
+        let pso = factory.create_pipeline_simple(
+            include_bytes!("../res/v2.glsl"),
+            include_bytes!("../res/f2.glsl"),
+            p2::new()
         ).unwrap();
 
         let x0 = -1.0;
@@ -179,28 +204,47 @@ impl Device {
 
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
         let quad_vertices = [
-            Vertex {
-                pos: [x0, y0], color: [1.0, 0.0, 0.0]
+            V2 {
+                pos: [x0, y0],// color: [1.0, 0.0, 0.0]
+                tex_coord: [0.0, 0.0],
             },
-            Vertex {
-                pos: [x1, y0], color: [0.0, 1.0, 0.0]
+            V2 {
+                pos: [x1, y0],// color: [0.0, 1.0, 0.0]
+                tex_coord: [1.0, 0.0],
             },
-            Vertex {
-                pos: [x0, y1], color: [0.0, 0.0, 1.0]
+            V2 {
+                pos: [x0, y1],// color: [0.0, 0.0, 1.0]
+                tex_coord: [0.0, 1.0],
             },
-            Vertex {
-                pos: [x1, y1], color: [1.0, 1.0, 1.0]
+            V2 {
+                pos: [x1, y1],// color: [1.0, 1.0, 1.0]
+                tex_coord: [1.0, 1.0],
             },
         ];
 
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
-        let data = pipe::Data {
+
+        let sampler_info = gfx::texture::SamplerInfo::new(
+            gfx::texture::FilterMethod::Scale,
+            gfx::texture::WrapMode::Clamp
+        );
+        //let sampler = factory.create_sampler_linear();
+        let sampler = factory.create_sampler(sampler_info);
+
+        let tex: gfx::handle::Texture<_, gfx::format::R8_G8_B8_A8> =
+            factory.create_texture::<gfx::format::R8_G8_B8_A8>(
+                texture::Kind::D2(max_texture_size as u16, max_texture_size as u16, texture::AaMode::Single), 1, gfx::memory::SHADER_RESOURCE, Usage::Dynamic, Some(Unorm)).unwrap();
+
+        let texture_view = factory.view_texture_as_shader_resource::<gfx::format::Rgba8>(
+            &tex, (0,0), gfx::format::Swizzle::new()
+        ).unwrap();
+
+        let data = p2::Data {
             vbuf: vertex_buffer,
+            color: (texture_view.clone(), sampler),
             out_color: main_color,
             out_depth: main_depth,
         };
-
-        //let sampler = factory.create_sampler_linear();
 
         /*let data = pipe::Data {
             transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
@@ -226,7 +270,13 @@ impl Device {
             out_depth: main_depth,
         };*/
 
-        let max_texture_size = factory.get_capabilities().max_texture_size as u32;
+        let mut texels = vec![];
+        for j in 0..max_texture_size {
+            for i in 0..max_texture_size {
+                texels.append(&mut vec![0x20, 0xA0, 0xC0, 0x00]);
+            }
+        }
+
         Device {
             device: device,
             factory: factory,
@@ -234,6 +284,9 @@ impl Device {
             pso: pso,
             data: data,
             slice: slice,
+            main_surface: tex,
+            main_view: texture_view,
+            texels: texels,
             max_texture_size: max_texture_size,
         }
     }
@@ -257,6 +310,22 @@ impl Device {
 
     pub fn draw(&mut self) {
         println!("draw!");
+        let tex = &self.main_surface;
+        let (width, height, _, _) = self.main_surface.get_info().kind.get_dimensions();
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let texels = &self.texels[..];
+        let data = gfx::memory::cast_slice(texels);
+        self.encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
         self.encoder.draw(&self.slice, &self.pso, &self.data);
         self.encoder.flush(&mut self.device);
     }
