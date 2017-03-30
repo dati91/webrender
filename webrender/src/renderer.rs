@@ -349,7 +349,7 @@ impl Renderer {
                 //println!("frame!");
                 println!("{:?}", frame.background_color);
                 self.device.clear_target(Some(frame.background_color.unwrap().to_array()), Some(1.0));
-                self.device.draw();
+                self.device.draw(frame);
             }
 
             // Restore frame - avoid borrow checker!
@@ -365,6 +365,8 @@ impl Renderer {
         if frame.passes.is_empty() {
             println!("empty!");
             self.device.clear_target(Some(self.clear_color.to_array()), Some(1.0));
+        } else {
+
         }
     }
 }

@@ -902,8 +902,10 @@ impl RenderTarget {
                 ctx: &RenderTargetContext,
                 render_tasks: &RenderTaskCollection,
                 pass_index: RenderPassIndex) {
+        println!("RenderTaskKind {:?}", task.kind);
         match task.kind {
             RenderTaskKind::Alpha(info) => {
+                println!("RenderTaskKind::Alpha");
                 self.alpha_batcher.add_task(AlphaBatchTask {
                     task_id: task.id,
                     opaque_items: info.opaque_items,

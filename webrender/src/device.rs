@@ -22,8 +22,10 @@ use std::path::PathBuf;
 use webrender_traits::{ColorF, ImageFormat};
 use webrender_traits::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
 
+use std;
 use glutin;
 use gfx;
+use gfx_core;
 use gfx::Factory;
 use gfx::texture;
 use gfx::traits::FactoryExt;
@@ -32,23 +34,13 @@ use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
 use gfx::CombinedError;
-use gfx::format::R8_G8_B8_A8;
-use gfx::format::Rgba8;
+use gfx::format::{R8_G8_B8_A8, Rgba8, R32_G32_B32_A32, Rgba32F};
 use gfx::memory::{Usage, SHADER_RESOURCE};
 use gfx::format::ChannelType::Unorm;
+use gfx::format::TextureSurface;
+use tiling::Frame;
 
 gfx_defines! {
-    vertex Vertex {
-        pos: [f32; 2] = "aPosition",
-        color: [f32; 3] = "aColor",
-    }
-
-    pipeline pipe {
-        vbuf: gfx::VertexBuffer<Vertex> = (),
-        out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
-        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
-    }
-
     vertex V2 {
         pos: [f32; 2] = "a_Pos",
         tex_coord: [f32; 2] = "a_TexCoord",
@@ -94,7 +86,183 @@ gfx_defines! {
         out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
+
+    // MIN PS RECT
+
+    vertex min_vertex {
+        pos: [f32; 3] = "aPosition",
+        glob_prim_id: i32 = "aGlobalPrimId",
+        primitive_address: i32 = "aPrimitiveAddress",
+        task_index: i32 = "aTaskIndex",
+        clip_task_index: i32 = "aClipTaskIndex",
+        layer_index: i32 = "aLayerIndex",
+        element_index: i32 = "aElementIndex",
+        user_data: [i32; 2] = "aUserData",
+        z_index: i32 = "aZIndex",
+    }
+
+    pipeline min_primitive {
+        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
+        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
+        vbuf: gfx::VertexBuffer<PrimitiveVertex> = (),
+        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
+        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
+        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
+        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
+        out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
+        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+    }
 }
+
+impl min_vertex {
+    fn new(p: [f32; 2]) -> min_vertex {
+        min_vertex {
+            pos: [p[0], p[1], 0.0],
+            glob_prim_id: 0,
+            primitive_address: 0,
+            task_index: 0,
+            clip_task_index: 0,
+            layer_index: 0,
+            element_index: 0,
+            user_data: [0, 0],
+            z_index: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Texture<R, T> where R: gfx::Resources,
+                               T: gfx::format::TextureFormat {
+    // Pixel storage for texture.
+    pub surface: gfx::handle::Texture<R, T::Surface>,
+    // Sampler for texture.
+    pub sampler: gfx::handle::Sampler<R>,
+    // View used by shader.
+    pub view: gfx::handle::ShaderResourceView<R, T::View>,
+    // Filtering mode
+    pub filter: TextureFilter,
+    // ImageFormat
+    pub format: ImageFormat,
+    // Render Target mode
+    pub mode: RenderTargetMode,
+}
+
+impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat {
+
+    pub fn empty<F>(factory: &mut F, size: [u32; 2]) -> Result<Texture<R, T>, CombinedError>
+        where F: gfx::Factory<R>
+    {
+        Texture::create(factory, None, size, TextureFilter::Nearest)
+    }
+
+    pub fn create<F>(factory: &mut F,
+                     data: Option<&[&[u8]]>,
+                     size: [u32; 2],
+                     filter: TextureFilter
+    ) -> Result<Texture<R, T>, CombinedError>
+        where F: gfx::Factory<R>
+    {
+        let (width, height) = (size[0] as u16, size[1] as u16);
+        let tex_kind = gfx::texture::Kind::D2(width, height,
+            gfx::texture::AaMode::Single);
+
+        let filter_method = match filter {
+            TextureFilter::Nearest => gfx::texture::FilterMethod::Scale,
+            TextureFilter::Linear => gfx::texture::FilterMethod::Bilinear,
+        };
+        let sampler_info = gfx::texture::SamplerInfo::new(
+            filter_method,
+            gfx::texture::WrapMode::Clamp
+        );
+
+        let (surface, view, format) = {
+            use gfx::{format, texture};
+            use gfx::memory::{Usage, SHADER_RESOURCE};
+            use gfx_core::memory::Typed;
+
+            let surface = <T::Surface as format::SurfaceTyped>::get_surface_type();
+            //let num_slices = tex_kind.get_num_slices().unwrap_or(1) as usize;
+            //let num_faces = if tex_kind.is_cube() {6} else {1};
+            let desc = texture::Info {
+                kind: tex_kind,
+                levels: 1,//(data.len() / (num_slices * num_faces)) as texture::Level,
+                format: surface,
+                bind: SHADER_RESOURCE,
+                usage: Usage::Dynamic,
+            };
+            let cty = <T::Channel as format::ChannelTyped>::get_channel_type();
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), data));
+            let levels = (0, raw.get_info().levels - 1);
+            let tex = Typed::new(raw);
+            let view = try!(factory.view_texture_as_shader_resource::<T>(
+                &tex, levels, format::Swizzle::new()
+            ));
+            let format = match surface {
+                R8_G8_B8_A8 => ImageFormat::RGBA8,
+                R32_G32_B32_A32 => ImageFormat::RGBAF32,
+            };
+            (tex, view, format)
+        };
+
+        let sampler = factory.create_sampler(sampler_info);
+
+        Ok(Texture {
+            surface: surface,
+            sampler: sampler,
+            view: view,
+            filter: filter,
+            format: format,
+            mode: RenderTargetMode::None,
+        })
+    }
+
+    /*pub fn update<C>(
+        &mut self,
+        encoder: &mut gfx::Encoder<R, C>,
+        img: &[u8],
+    ) -> Result<(), gfx::UpdateError<[u16; 3]>>
+        where C: gfx::CommandBuffer<R>,
+    {
+        let (width, height) = self.get_size();
+        let offset = [0, 0];
+        let size = [width, height];
+        let tex = &self.surface;
+        let face = None;
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: offset[0] as u16,
+            yoffset: offset[1] as u16,
+            zoffset: 0,
+            width: size[0] as u16,
+            height: size[1] as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+        use gfx::format;
+        let data = gfx::memory::cast_slice(img);
+
+        encoder.update_texture::<_, T>(tex, face, img_info, data).map_err(Into::into)
+    }*/
+
+    #[inline(always)]
+    pub fn get_size(&self) -> (u32, u32) {
+        let (w, h, _, _) = self.surface.get_info().kind.get_dimensions();
+        (w as u32, h as u32)
+    }
+
+    #[inline(always)]
+    fn get_width(&self) -> u32 {
+        let (w, _) = self.get_size();
+        w
+    }
+
+    #[inline(always)]
+    fn get_height(&self) -> u32 {
+        let (_, h) = self.get_size();
+        h
+    }
+}
+
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureTarget {
@@ -167,8 +335,9 @@ pub struct Device {
     pso: gfx::PipelineState<R, p2::Meta>,
     data: p2::Data<R>,
     slice: gfx::Slice<R>,
-    main_surface: gfx::handle::Texture<R, R8_G8_B8_A8>,
-    main_view: gfx::handle::ShaderResourceView<R, [f32; 4]>,
+    //tex: Texture<R, Rgba8>,
+    //data16: Texture<R, Rgba8>,
+    layer: Texture<R, Rgba8>,
     texels: Vec<u8>,
     max_texture_size: u32,
 }
@@ -183,13 +352,13 @@ impl Device {
         println!("Shading Language: {:?}", device.get_info().shading_language);
         let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
         //let max_texture_size = factory.get_capabilities().max_texture_size as u32;
-        let max_texture_size = 256;
+        let max_texture_size = 16;
 
-        /*let ps_rectangle_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.vs.glsl")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/min_ps_rectangle.fs.glsl")),
-            primitive::new()
-        ).unwrap();*/
+        let ps_rectangle_pso = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/min2_ps_rectangle.vs.glsl")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/min2_ps_rectangle.fs.glsl")),
+            min_primitive::new()
+        ).unwrap();
 
         let pso = factory.create_pipeline_simple(
             include_bytes!("../res/v2.glsl"),
@@ -204,44 +373,27 @@ impl Device {
 
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
         let quad_vertices = [
-            V2 {
-                pos: [x0, y0],// color: [1.0, 0.0, 0.0]
-                tex_coord: [0.0, 0.0],
-            },
-            V2 {
-                pos: [x1, y0],// color: [0.0, 1.0, 0.0]
-                tex_coord: [1.0, 0.0],
-            },
-            V2 {
-                pos: [x0, y1],// color: [0.0, 0.0, 1.0]
-                tex_coord: [0.0, 1.0],
-            },
-            V2 {
-                pos: [x1, y1],// color: [1.0, 1.0, 1.0]
-                tex_coord: [1.0, 1.0],
-            },
+            V2 { pos: [x0, y0], tex_coord: [0.0, 0.0] },
+            V2 { pos: [x1, y0], tex_coord: [1.0, 0.0] },
+            V2 { pos: [x0, y1], tex_coord: [0.0, 1.0] },
+            V2 { pos: [x1, y1], tex_coord: [1.0, 1.0] },
+        ];
+
+        let min_quad_vertices = [
+            min_vertex::new([x0, y0]),
+            min_vertex::new([x1, y0]),
+            min_vertex::new([x0, y1]),
+            min_vertex::new([x1, y1]),
         ];
 
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
 
-        let sampler_info = gfx::texture::SamplerInfo::new(
-            gfx::texture::FilterMethod::Scale,
-            gfx::texture::WrapMode::Clamp
-        );
-        //let sampler = factory.create_sampler_linear();
-        let sampler = factory.create_sampler(sampler_info);
-
-        let tex: gfx::handle::Texture<_, gfx::format::R8_G8_B8_A8> =
-            factory.create_texture::<gfx::format::R8_G8_B8_A8>(
-                texture::Kind::D2(max_texture_size as u16, max_texture_size as u16, texture::AaMode::Single), 1, gfx::memory::SHADER_RESOURCE, Usage::Dynamic, Some(Unorm)).unwrap();
-
-        let texture_view = factory.view_texture_as_shader_resource::<gfx::format::Rgba8>(
-            &tex, (0,0), gfx::format::Swizzle::new()
-        ).unwrap();
+        //let data16_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
+        let layer_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
 
         let data = p2::Data {
             vbuf: vertex_buffer,
-            color: (texture_view.clone(), sampler),
+            color: (layer_tex.clone().view, layer_tex.clone().sampler),
             out_color: main_color,
             out_depth: main_depth,
         };
@@ -284,8 +436,9 @@ impl Device {
             pso: pso,
             data: data,
             slice: slice,
-            main_surface: tex,
-            main_view: texture_view,
+            //tex: main_tex,
+            //data16: data16_tex,
+            layer: layer_tex,
             texels: texels,
             max_texture_size: max_texture_size,
         }
@@ -308,10 +461,28 @@ impl Device {
         }
     }
 
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self, frame: &mut Frame) {
         println!("draw!");
-        let tex = &self.main_surface;
-        let (width, height, _, _) = self.main_surface.get_info().kind.get_dimensions();
+        println!("gpu_data16.len {}", frame.gpu_data16.len());
+        println!("gpu_data32.len {}", frame.gpu_data32.len());
+        println!("gpu_data64.len {}", frame.gpu_data64.len());
+        println!("gpu_data128.len {}", frame.gpu_data128.len());
+        println!("gpu_geometry.len {}", frame.gpu_geometry.len());
+        println!("gpu_resource_rects.len {}", frame.gpu_resource_rects.len());
+        println!("layer_texture_data.len {}", frame.layer_texture_data.len());
+        println!("render_task_data.len {}", frame.render_task_data.len());
+        println!("gpu_gradient_data.len {}", frame.gpu_gradient_data.len());
+        //let data = self.texels.clone();
+        //self.update_texture(&data[..]);
+        //Device::update_texture_u8(&mut self.encoder, &self.layer, unsafe { mem::transmute(frame.layer_texture_data.as_slice()) });
+
+        self.encoder.draw(&self.slice, &self.pso, &self.data);
+        self.encoder.flush(&mut self.device);
+    }
+
+    pub fn update_texture_f32(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba32F>, memory: &[u8]) {
+        let tex = &texture.surface;
+        let (width, height) = texture.get_size();
         let img_info = gfx::texture::ImageInfoCommon {
             xoffset: 0,
             yoffset: 0,
@@ -323,10 +494,25 @@ impl Device {
             mipmap: 0,
         };
 
-        let texels = &self.texels[..];
-        let data = gfx::memory::cast_slice(texels);
-        self.encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
-        self.encoder.draw(&self.slice, &self.pso, &self.data);
-        self.encoder.flush(&mut self.device);
+        let data = gfx::memory::cast_slice(memory);
+        encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
+    }
+
+    fn update_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
+        let tex = &texture.surface;
+        let (width, height) = texture.get_size();
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let data = gfx::memory::cast_slice(memory);
+        encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
     }
 }
