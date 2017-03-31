@@ -38,35 +38,12 @@ use gfx::format::{R8_G8_B8_A8, Rgba8, R32_G32_B32_A32, Rgba32F};
 use gfx::memory::{Usage, SHADER_RESOURCE};
 use gfx::format::ChannelType::Unorm;
 use gfx::format::TextureSurface;
-use tiling::Frame;
+use tiling::{Frame, PackedLayer, PrimitiveInstance};
+use render_task::RenderTaskData;
+use prim_store::{GpuBlock16, PrimitiveGeometry};
 
 gfx_defines! {
-    vertex V2 {
-        pos: [f32; 2] = "a_Pos",
-        tex_coord: [f32; 2] = "a_TexCoord",
-    }
-
-    pipeline p2 {
-        vbuf: gfx::VertexBuffer<V2> = (),
-        color: gfx::TextureSampler<[f32; 4]> = "t_Color",
-        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
-        out_depth: gfx::DepthTarget<DepthFormat> =
-            gfx::preset::depth::LESS_EQUAL_WRITE,
-    }
-
-    vertex PrimitiveVertex {
-        pos: [f32; 3] = "aPosition",
-        glob_prim_id: i32 = "aGlobalPrimId",
-        primitive_address: i32 = "aPrimitiveAddress",
-        task_index: i32 = "aTaskIndex",
-        clip_task_index: i32 = "aClipTaskIndex",
-        layer_index: i32 = "aLayerIndex",
-        element_index: i32 = "aElementIndex",
-        user_data: [i32; 2] = "aUserData",
-        z_index: i32 = "aZIndex",
-    }
-
-    pipeline primitive {
+    /*pipeline primitive {
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
         vbuf: gfx::VertexBuffer<PrimitiveVertex> = (),
@@ -85,12 +62,15 @@ gfx_defines! {
         resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
         out_color: gfx::RenderTarget<ColorFormat> = "oFragColor",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
-    }
+    }*/
 
     // MIN PS RECT
 
     vertex min_vertex {
         pos: [f32; 3] = "aPosition",
+    }
+
+    vertex min_instance {
         glob_prim_id: i32 = "aGlobalPrimId",
         primitive_address: i32 = "aPrimitiveAddress",
         task_index: i32 = "aTaskIndex",
@@ -104,7 +84,8 @@ gfx_defines! {
     pipeline min_primitive {
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<PrimitiveVertex> = (),
+        vbuf: gfx::VertexBuffer<min_vertex> = (),
+        ibuf: gfx::InstanceBuffer<min_instance> = (),
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
         prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
@@ -118,6 +99,13 @@ impl min_vertex {
     fn new(p: [f32; 2]) -> min_vertex {
         min_vertex {
             pos: [p[0], p[1], 0.0],
+        }
+    }
+}
+
+impl min_instance {
+    fn new() -> min_instance {
+        min_instance {
             glob_prim_id: 0,
             primitive_address: 0,
             task_index: 0,
@@ -127,6 +115,17 @@ impl min_vertex {
             user_data: [0, 0],
             z_index: 0,
         }
+    }
+
+    fn update(&mut self, instance: &PrimitiveInstance) {
+        self.glob_prim_id = instance.global_prim_id;
+        self.primitive_address = instance.prim_address.0;
+        self.task_index = instance.task_index;
+        self.clip_task_index = instance.clip_task_index;
+        self.layer_index = instance.layer_index;
+        self.element_index = instance.sub_index;
+        self.user_data = instance.user_data;
+        self.z_index = instance.z_sort_index;
     }
 }
 
@@ -181,11 +180,9 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
             use gfx_core::memory::Typed;
 
             let surface = <T::Surface as format::SurfaceTyped>::get_surface_type();
-            //let num_slices = tex_kind.get_num_slices().unwrap_or(1) as usize;
-            //let num_faces = if tex_kind.is_cube() {6} else {1};
             let desc = texture::Info {
                 kind: tex_kind,
-                levels: 1,//(data.len() / (num_slices * num_faces)) as texture::Level,
+                levels: 1,
                 format: surface,
                 bind: SHADER_RESOURCE,
                 usage: Usage::Dynamic,
@@ -215,34 +212,6 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
             mode: RenderTargetMode::None,
         })
     }
-
-    /*pub fn update<C>(
-        &mut self,
-        encoder: &mut gfx::Encoder<R, C>,
-        img: &[u8],
-    ) -> Result<(), gfx::UpdateError<[u16; 3]>>
-        where C: gfx::CommandBuffer<R>,
-    {
-        let (width, height) = self.get_size();
-        let offset = [0, 0];
-        let size = [width, height];
-        let tex = &self.surface;
-        let face = None;
-        let img_info = gfx::texture::ImageInfoCommon {
-            xoffset: offset[0] as u16,
-            yoffset: offset[1] as u16,
-            zoffset: 0,
-            width: size[0] as u16,
-            height: size[1] as u16,
-            depth: 0,
-            format: (),
-            mipmap: 0,
-        };
-        use gfx::format;
-        let data = gfx::memory::cast_slice(img);
-
-        encoder.update_texture::<_, T>(tex, face, img_info, data).map_err(Into::into)
-    }*/
 
     #[inline(always)]
     pub fn get_size(&self) -> (u32, u32) {
@@ -332,13 +301,14 @@ pub struct Device {
     device: device_gl::Device,
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
-    pso: gfx::PipelineState<R, p2::Meta>,
-    data: p2::Data<R>,
+    pso: gfx::PipelineState<R, min_primitive::Meta>,
+    data: min_primitive::Data<R>,
     slice: gfx::Slice<R>,
-    //tex: Texture<R, Rgba8>,
-    //data16: Texture<R, Rgba8>,
-    layer: Texture<R, Rgba8>,
-    texels: Vec<u8>,
+    upload: gfx::handle::Buffer<R, min_instance>,
+    layers: Texture<R, Rgba32F>,
+    render_tasks: Texture<R, Rgba32F>,
+    prim_geo: Texture<R, Rgba32F>,
+    data16: Texture<R, Rgba32F>,
     max_texture_size: u32,
 }
 
@@ -351,19 +321,12 @@ impl Device {
         println!("Version: {:?}", device.get_info().version);
         println!("Shading Language: {:?}", device.get_info().shading_language);
         let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
-        //let max_texture_size = factory.get_capabilities().max_texture_size as u32;
-        let max_texture_size = 16;
-
-        let ps_rectangle_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/min2_ps_rectangle.vs.glsl")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/min2_ps_rectangle.fs.glsl")),
-            min_primitive::new()
-        ).unwrap();
+        let max_texture_size = factory.get_capabilities().max_texture_size as u32;
 
         let pso = factory.create_pipeline_simple(
-            include_bytes!("../res/v2.glsl"),
-            include_bytes!("../res/f2.glsl"),
-            p2::new()
+            include_bytes!("../res/min_ps_rectangle.vert"),
+            include_bytes!("../res/min_ps_rectangle.frag"),
+            min_primitive::new()
         ).unwrap();
 
         let x0 = -1.0;
@@ -372,13 +335,6 @@ impl Device {
         let y1 = 1.0;
 
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
-        let quad_vertices = [
-            V2 { pos: [x0, y0], tex_coord: [0.0, 0.0] },
-            V2 { pos: [x1, y0], tex_coord: [1.0, 0.0] },
-            V2 { pos: [x0, y1], tex_coord: [0.0, 1.0] },
-            V2 { pos: [x1, y1], tex_coord: [1.0, 1.0] },
-        ];
-
         let min_quad_vertices = [
             min_vertex::new([x0, y0]),
             min_vertex::new([x1, y0]),
@@ -386,48 +342,39 @@ impl Device {
             min_vertex::new([x1, y1]),
         ];
 
-        let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+        let instance_count = 2;
+        let upload = factory.create_upload_buffer(instance_count as usize).unwrap();
+        {
+            let mut writer = factory.write_mapping(&upload).unwrap();
+            writer[0] = min_instance::new();
+            writer[1] = min_instance::new();
+        }
 
-        //let data16_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
-        let layer_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
+        let instances = factory
+            .create_buffer(instance_count as usize,
+                           gfx::buffer::Role::Vertex,
+                           gfx::memory::Usage::Data,
+                           gfx::TRANSFER_DST).unwrap();
 
-        let data = p2::Data {
+        let (vertex_buffer, mut slice) = factory.create_vertex_buffer_with_slice(&min_quad_vertices, quad_indices);
+        slice.instances = Some((instance_count, 0));
+        let layers_tex = Texture::empty(&mut factory, [13, 6]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [3, 1]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [2, 512]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
+
+        let data = min_primitive::Data {
+            transform: [[0f32;4];4],
+            device_pixel_ratio: 1f32,
             vbuf: vertex_buffer,
-            color: (layer_tex.clone().view, layer_tex.clone().sampler),
+            ibuf: instances,
+            layers: (layers_tex.clone().view, layers_tex.clone().sampler),
+            render_tasks: (render_tasks_tex.clone().view, render_tasks_tex.clone().sampler),
+            prim_geometry: (prim_geo_tex.clone().view, prim_geo_tex.clone().sampler),
+            data16: (data16_tex.clone().view, data16_tex.clone().sampler),
             out_color: main_color,
             out_depth: main_depth,
         };
-
-        /*let data = pipe::Data {
-            transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
-            device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-            vbuf: vertex_buffer,
-
-            color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-            color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-            color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-            mask: gfx::TextureSampler<[f32; 4]> = "sMask",
-            cache: gfx::TextureSampler<f32> = "sCache",
-            layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-            render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-            prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-            data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-            data32: gfx::TextureSampler<[f32; 4]> = "sData32",
-            data64: gfx::TextureSampler<[f32; 4]> = "sData64",
-            data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-            resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
-
-
-            out_color: main_color,
-            out_depth: main_depth,
-        };*/
-
-        let mut texels = vec![];
-        for j in 0..max_texture_size {
-            for i in 0..max_texture_size {
-                texels.append(&mut vec![0x20, 0xA0, 0xC0, 0x00]);
-            }
-        }
 
         Device {
             device: device,
@@ -436,10 +383,11 @@ impl Device {
             pso: pso,
             data: data,
             slice: slice,
-            //tex: main_tex,
-            //data16: data16_tex,
-            layer: layer_tex,
-            texels: texels,
+            upload: upload,
+            layers: layers_tex,
+            render_tasks: render_tasks_tex,
+            prim_geo: prim_geo_tex,
+            data16: data16_tex,
             max_texture_size: max_texture_size,
         }
     }
@@ -461,8 +409,8 @@ impl Device {
         }
     }
 
-    pub fn draw(&mut self, frame: &mut Frame) {
-        println!("draw!");
+    pub fn update(&mut self, frame: &mut Frame) {
+        println!("update!");
         println!("gpu_data16.len {}", frame.gpu_data16.len());
         println!("gpu_data32.len {}", frame.gpu_data32.len());
         println!("gpu_data64.len {}", frame.gpu_data64.len());
@@ -472,15 +420,37 @@ impl Device {
         println!("layer_texture_data.len {}", frame.layer_texture_data.len());
         println!("render_task_data.len {}", frame.render_task_data.len());
         println!("gpu_gradient_data.len {}", frame.gpu_gradient_data.len());
-        //let data = self.texels.clone();
-        //self.update_texture(&data[..]);
-        //Device::update_texture_u8(&mut self.encoder, &self.layer, unsafe { mem::transmute(frame.layer_texture_data.as_slice()) });
+        Device::update_texture_f32(&mut self.encoder, &self.data16, unsafe { mem::transmute(frame.gpu_data16.as_slice()) });
+        Device::update_texture_f32(&mut self.encoder, &self.layers, Device::convert_layer(frame.layer_texture_data.clone()).as_slice());
+        Device::update_texture_f32(&mut self.encoder, &self.render_tasks, Device::convert_render_task(frame.render_task_data.clone()).as_slice());
+        Device::update_texture_f32(&mut self.encoder, &self.prim_geo, Device::convert_prim_geo(frame.gpu_geometry.clone()).as_slice());
+        //self.draw();
+    }
 
+    pub fn draw(&mut self, proj: Matrix4D<f32>, instances: &[PrimitiveInstance]) {
+        println!("draw!");
+        println!("proj: {:?}", proj);
+        println!("data: {:?}", instances);
+        self.data.transform = proj.to_row_arrays();
+        {
+            let mut writer = self.factory.write_mapping(&self.upload).unwrap();
+            println!("writer!");
+            for (i, inst) in instances.iter().enumerate() {
+                println!("instance[{}]: {:?}", i, inst);
+                writer[i].update(inst);
+                println!("{:?}", writer[i]);
+            }
+        }
+        //println!("upload {:?}", &self.upload);
+        println!("copy");
+        self.encoder.copy_buffer(&self.upload, &self.data.ibuf,
+                            0, 0, self.upload.len()).unwrap();
+        println!("draw & flush");
         self.encoder.draw(&self.slice, &self.pso, &self.data);
         self.encoder.flush(&mut self.device);
     }
 
-    pub fn update_texture_f32(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba32F>, memory: &[u8]) {
+    pub fn update_texture_f32(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba32F>, memory: &[f32]) {
         let tex = &texture.surface;
         let (width, height) = texture.get_size();
         let img_info = gfx::texture::ImageInfoCommon {
@@ -498,7 +468,7 @@ impl Device {
         encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
-    fn update_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
+    pub fn update_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
         let tex = &texture.surface;
         let (width, height) = texture.get_size();
         let img_info = gfx::texture::ImageInfoCommon {
@@ -514,5 +484,55 @@ impl Device {
 
         let data = gfx::memory::cast_slice(memory);
         encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
+    }
+
+    fn convert_data16(data16: Vec<GpuBlock16>) -> Vec<f32> {
+        let mut data: Vec<f32> = vec!();
+        for d in data16 {
+            println!("{:?}", d.data);
+            data.append(& mut d.data.to_vec());
+        }
+        println!("convert_data16 len {:?}", data.len());
+        data
+    }
+
+    fn convert_layer(layers: Vec<PackedLayer>) -> Vec<f32> {
+        let mut data: Vec<f32> = vec!();
+        for l in layers {
+            println!("{:?}", l);
+            data.append(& mut l.transform.to_row_major_array().to_vec());
+            data.append(& mut l.inv_transform.to_row_major_array().to_vec());
+            data.append(& mut l.local_clip_rect.origin.to_array().to_vec());
+            data.append(& mut l.local_clip_rect.size.to_array().to_vec());
+            data.append(& mut l.screen_vertices[0].to_array().to_vec());
+            data.append(& mut l.screen_vertices[1].to_array().to_vec());
+            data.append(& mut l.screen_vertices[2].to_array().to_vec());
+            data.append(& mut l.screen_vertices[3].to_array().to_vec());
+        }
+        println!("convert_layer len {:?}", data.len());
+        data
+    }
+
+    fn convert_render_task(render_tasks: Vec<RenderTaskData>) -> Vec<f32> {
+        let mut data: Vec<f32> = vec!();
+        for rt in render_tasks {
+            println!("{:?}", rt);
+            data.append(& mut rt.data.to_vec());
+        }
+        println!("convert_render_task len {:?}", data.len());
+        data
+    }
+
+    fn convert_prim_geo(prim_geo: Vec<PrimitiveGeometry>) -> Vec<f32> {
+        let mut data: Vec<f32> = vec!();
+        for pg in prim_geo {
+            //println!("{:?}", pg);
+            data.append(& mut pg.local_rect.origin.to_array().to_vec());
+            data.append(& mut pg.local_rect.size.to_array().to_vec());
+            data.append(& mut pg.local_clip_rect.origin.to_array().to_vec());
+            data.append(& mut pg.local_clip_rect.size.to_array().to_vec());
+        }
+        println!("convert_prim_geo len {:?}", data.len());
+        data
     }
 }

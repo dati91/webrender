@@ -347,11 +347,11 @@ impl Renderer {
         if let Some(mut frame) = self.current_frame.take() {
             if let Some(ref mut frame) = frame.frame {
                 //println!("frame!");
-                println!("{:?}", frame.background_color);
-                self.device.clear_target(Some(frame.background_color.unwrap().to_array()), Some(1.0));
-                self.device.draw(frame);
+                //println!("{:?}", frame.background_color);
+                //self.device.clear_target(Some(frame.background_color.unwrap().to_array()), Some(1.0));
+                //self.device.draw(frame);
+                self.draw_tile_frame(frame);
             }
-
             // Restore frame - avoid borrow checker!
             self.current_frame = Some(frame);
         } else {
@@ -360,13 +360,37 @@ impl Renderer {
     }
 
     fn draw_tile_frame(&mut self,
-                       frame: &mut Frame,
-                       framebuffer_size: &DeviceUintSize) {
+                       frame: &mut Frame) {
+        self.device.clear_target(Some(frame.background_color.unwrap().to_array()), Some(1.0));
         if frame.passes.is_empty() {
             println!("empty!");
-            self.device.clear_target(Some(self.clear_color.to_array()), Some(1.0));
         } else {
-
+            self.device.update(frame);
+            for (pass_index, pass) in frame.passes.iter().enumerate() {
+                for (target_index, target) in pass.targets.iter().enumerate() {
+                    for batch in &target.alpha_batcher.opaque_batches {
+                        println!("{:?}", batch);
+                        /*self.submit_batch(batch,
+                                          &projection,
+                                          render_task_data,
+                                          cache_texture,
+                                          render_target,
+                                          target_size);*/
+                        let proj = Matrix4D::ortho(0.0,
+                                    frame.cache_size.width as f32,
+                                    frame.cache_size.height as f32,
+                                    0.0,
+                                    ORTHO_NEAR_PLANE,
+                                    ORTHO_FAR_PLANE);
+                        match batch.data {
+                            PrimitiveBatchData::Instances(ref data) => {
+                                self.device.draw(proj, data);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
         }
     }
 }

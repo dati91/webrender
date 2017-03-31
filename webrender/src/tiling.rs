@@ -905,7 +905,6 @@ impl RenderTarget {
         println!("RenderTaskKind {:?}", task.kind);
         match task.kind {
             RenderTaskKind::Alpha(info) => {
-                println!("RenderTaskKind::Alpha");
                 self.alpha_batcher.add_task(AlphaBatchTask {
                     task_id: task.id,
                     opaque_items: info.opaque_items,
@@ -1208,13 +1207,13 @@ pub struct CacheClipInstance {
 
 #[derive(Debug, Clone)]
 pub struct PrimitiveInstance {
-    global_prim_id: i32,
-    prim_address: GpuStoreAddress,
+    pub global_prim_id: i32,
+    pub prim_address: GpuStoreAddress,
     pub task_index: i32,
-    clip_task_index: i32,
-    layer_index: i32,
-    sub_index: i32,
-    z_sort_index: i32,
+    pub clip_task_index: i32,
+    pub layer_index: i32,
+    pub sub_index: i32,
+    pub z_sort_index: i32,
     pub user_data: [i32; 2],
 }
 
