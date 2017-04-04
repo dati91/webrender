@@ -190,7 +190,7 @@ struct PrimitiveGeometry {
 PrimitiveGeometry fetch_prim_geometry(int index) {
     PrimitiveGeometry pg;
 
-    ivec2 uv = get_fetch_uv(index, VECS_PER_PRIM_GEOM);
+    ivec2 uv = get_fetch_uv(1-index, VECS_PER_PRIM_GEOM);
 
     vec4 local_rect = texelFetchOffset(sPrimGeometry, uv, 0, ivec2(0, 0));
     pg.local_rect = RectWithSize(local_rect.xy, local_rect.zw);
@@ -306,8 +306,14 @@ VertexInfo write_vertex(RectWithSize instance_rect,
                      task.screen_space_origin +
                      task.render_target_origin;
 
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-
+    //gl_Position = uTransform * vec4(final_pos, z, 1.0);
+    //gl_Position = vec4(final_pos, z, 1.0);
+    //gl_Position = uTransform * vec4(aPosition.xy, z, 1.0);
+    //gl_Position = vec4(aPosition.xy, z, 1.0);
+    //vec2 pos = vec2(local_pos.x / local_clip_rect.size.x, local_pos.y / local_clip_rect.size.y);
+    vec2 pos = vec2(local_pos.x / 1024.0, local_pos.y / 768.0);
+    //vec2 pos = vec2(local_pos.x, local_pos.y);
+    gl_Position = vec4(pos, z, 1.0);
     VertexInfo vi = VertexInfo(local_rect, local_p0_pos.zw, device_p0_pos.zw);
     return vi;
 }
@@ -336,6 +342,10 @@ void main(void) {
     Primitive prim = load_primitive();
     Rectangle rect = fetch_rectangle(prim.prim_index);
     vColor = rect.color;
+    //vColor = vec4(aPosition.xy, prim.prim_index, 1.0);
+    //RectWithEndpoint local_rect = to_rect_with_endpoint(prim.local_rect);
+    //vColor = vec4(mix(local_rect.p0, local_rect.p1, aPosition.xy),0.0, 1.0);
+    //vColor = vec4(prim.local_rect.p0.x, prim.local_rect.p0.y, prim.prim_index, 1.0);
     VertexInfo vi = write_vertex(prim.local_rect,
                                  prim.local_clip_rect,
                                  prim.z,

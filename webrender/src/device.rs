@@ -125,7 +125,7 @@ impl min_instance {
         self.layer_index = instance.layer_index;
         self.element_index = instance.sub_index;
         self.user_data = instance.user_data;
-        self.z_index = instance.z_sort_index;
+        self.z_index = instance.z_sort_index * -1;
     }
 }
 
@@ -329,23 +329,43 @@ impl Device {
             min_primitive::new()
         ).unwrap();
 
-        let x0 = -1.0;
+        /*let x0 = -1.0;
         let y0 = -1.0;
         let x1 = 1.0;
+        let y1 = 1.0;*/
+        let x0 = 0.0;
+        let y0 = 0.0;
+        let x1 = 1.0;
         let y1 = 1.0;
+        /*let x0 = -0.5;
+        let y0 = -0.5;
+        let x1 = 0.5;
+        let y1 = 0.5;*/
+        /*let x0 = 0.0;
+        let y0 = 0.0;
+        let x1 = 1.0;
+        let y1 = 1.0;*/
 
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
+        //let quad_indices: &[u16] = &[ 0, 1, 2, 2, 3, 0 ];
         let min_quad_vertices = [
             min_vertex::new([x0, y0]),
             min_vertex::new([x1, y0]),
             min_vertex::new([x0, y1]),
             min_vertex::new([x1, y1]),
         ];
+        /*let min_quad_vertices = [
+            min_vertex::new([x0, y1]),
+            min_vertex::new([x0, y0]),
+            min_vertex::new([x1, y0]),
+            min_vertex::new([x1, y1]),
+        ];*/
 
         let instance_count = 2;
         let upload = factory.create_upload_buffer(instance_count as usize).unwrap();
         {
             let mut writer = factory.write_mapping(&upload).unwrap();
+            println!("writer len: {}", writer.len());
             writer[0] = min_instance::new();
             writer[1] = min_instance::new();
         }
@@ -360,7 +380,7 @@ impl Device {
         slice.instances = Some((instance_count, 0));
         let layers_tex = Texture::empty(&mut factory, [13, 6]).unwrap();
         let render_tasks_tex = Texture::empty(&mut factory, [3, 1]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [2, 512]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [2, 2]).unwrap();
         let data16_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
 
         let data = min_primitive::Data {
@@ -420,6 +440,14 @@ impl Device {
         println!("layer_texture_data.len {}", frame.layer_texture_data.len());
         println!("render_task_data.len {}", frame.render_task_data.len());
         println!("gpu_gradient_data.len {}", frame.gpu_gradient_data.len());
+        println!("device_pixel_ratio: {}", frame.device_pixel_ratio);
+        if frame.render_task_data.len() == 1 {
+            println!("{:?}", frame.render_task_data);
+            println!("{:?}", frame.layer_texture_data);
+            println!("{:?}", frame.gpu_geometry[0]);
+            println!("{:?}", frame.gpu_geometry[1]);
+            //println!("{:?}", frame.gpu_data16.data);
+        }
         Device::update_texture_f32(&mut self.encoder, &self.data16, unsafe { mem::transmute(frame.gpu_data16.as_slice()) });
         Device::update_texture_f32(&mut self.encoder, &self.layers, Device::convert_layer(frame.layer_texture_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.render_tasks, Device::convert_render_task(frame.render_task_data.clone()).as_slice());
@@ -434,18 +462,25 @@ impl Device {
         self.data.transform = proj.to_row_arrays();
         {
             let mut writer = self.factory.write_mapping(&self.upload).unwrap();
-            println!("writer!");
+            println!("writer! {}", writer.len());
             for (i, inst) in instances.iter().enumerate() {
                 println!("instance[{}]: {:?}", i, inst);
                 writer[i].update(inst);
                 println!("{:?}", writer[i]);
             }
+            //writer[0].update(&instances[0]);
         }
         //println!("upload {:?}", &self.upload);
         println!("copy");
         self.encoder.copy_buffer(&self.upload, &self.data.ibuf,
                             0, 0, self.upload.len()).unwrap();
         println!("draw & flush");
+        /*println!("vbuf {:?}", self.data.vbuf.get_info());
+        println!("ibuf {:?}", self.data.ibuf);
+        println!("layers {:?}", self.layers);
+        println!("render_tasks {:?}", self.render_tasks);
+        println!("prim_geo {:?}", self.prim_geo);
+        println!("data16 {:?}", self.data16);*/
         self.encoder.draw(&self.slice, &self.pso, &self.data);
         self.encoder.flush(&mut self.device);
     }
@@ -526,11 +561,15 @@ impl Device {
     fn convert_prim_geo(prim_geo: Vec<PrimitiveGeometry>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for pg in prim_geo {
-            //println!("{:?}", pg);
+            if data.len() == 16 {
+                break;
+            }
+            println!("pg {:?}", pg);
             data.append(& mut pg.local_rect.origin.to_array().to_vec());
             data.append(& mut pg.local_rect.size.to_array().to_vec());
             data.append(& mut pg.local_clip_rect.origin.to_array().to_vec());
             data.append(& mut pg.local_clip_rect.size.to_array().to_vec());
+            println!("data: {:?}", data);
         }
         println!("convert_prim_geo len {:?}", data.len());
         data

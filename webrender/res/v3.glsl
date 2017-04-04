@@ -1,8 +1,17 @@
 #version 120
 
 attribute vec2 a_Pos;
+
+uniform mat4 uTransform;
+uniform float uDevicePixelRatio;
+
 attribute vec2 a_TexCoord;
 varying vec2 v_TexCoord;
+
+uniform sampler2D sLayers;
+uniform sampler2D sRenderTasks;
+uniform sampler2D sPrimGeometry;
+uniform sampler2D sData16;
 
 void main() {
     //v_TexCoord = a_TexCoord;
