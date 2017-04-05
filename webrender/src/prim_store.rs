@@ -1272,7 +1272,7 @@ impl PrimitiveStore {
 #[derive(Clone)]
 #[repr(C)]
 pub struct GpuBlock16 {
-    data: [f32; 4],
+    pub data: [f32; 4],
 }
 
 impl Default for GpuBlock16 {

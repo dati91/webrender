@@ -1165,6 +1165,7 @@ impl RenderTarget for ColorRenderTarget {
     }
 }
 
+#[derive(Debug)]
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
     allocator: TextureAllocator,
@@ -1429,13 +1430,13 @@ pub struct CacheClipInstance {
 
 #[derive(Debug, Clone)]
 pub struct PrimitiveInstance {
-    global_prim_id: i32,
-    prim_address: GpuStoreAddress,
+    pub global_prim_id: i32,
+    pub prim_address: GpuStoreAddress,
     pub task_index: i32,
-    clip_task_index: i32,
-    layer_index: i32,
-    sub_index: i32,
-    z_sort_index: i32,
+    pub clip_task_index: i32,
+    pub layer_index: i32,
+    pub sub_index: i32,
+    pub z_sort_index: i32,
     pub user_data: [i32; 2],
 }
 

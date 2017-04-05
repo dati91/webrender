@@ -643,7 +643,7 @@ impl Renderer {
                     batch: &PrimitiveBatch,
                     projection: &Matrix4D<f32>,
                     render_task_data: &Vec<RenderTaskData>,
-                    cache_texture: TextureId,
+                    //cache_texture: TextureId,
                     render_target: Option<(TextureId, i32)>,
                     target_dimensions: DeviceUintSize) {
         let transform_kind = batch.key.flags.transform_kind();
@@ -653,6 +653,10 @@ impl Renderer {
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
 
         match batch.data {
+            PrimitiveBatchData::Instances(ref data) => {
+                self.device.draw(projection, data);
+            },
+            _ => {}
             /*PrimitiveBatchData::Instances(ref data) => {
                 let (marker, shader) = match batch.key.kind {
                     AlphaBatchKind::Composite => unreachable!(),
@@ -797,7 +801,7 @@ impl Renderer {
                          render_target: Option<(TextureId, i32)>,
                          target: &ColorRenderTarget,
                          target_size: DeviceUintSize,
-                         color_cache_texture: TextureId,
+                         //color_cache_texture: TextureId,
                          clear_color: Option<[f32; 4]>,
                          render_task_data: &Vec<RenderTaskData>,
                          projection: &Matrix4D<f32>) {
@@ -899,18 +903,18 @@ impl Renderer {
 
         self.device.set_depth_func(DepthFunction::Less);
         self.device.enable_depth();
-        self.device.enable_depth_write();
+        self.device.enable_depth_write();*/
 
         for batch in &target.alpha_batcher.opaque_batches {
             self.submit_batch(batch,
                               &projection,
                               render_task_data,
-                              color_cache_texture,
+                              //color_cache_texture,
                               render_target,
                               target_size);
         }
 
-        self.device.disable_depth_write();
+        /*self.device.disable_depth_write();
 
         for batch in &target.alpha_batcher.alpha_batches {
             if batch.key.blend_mode != prev_blend_mode {
@@ -947,10 +951,11 @@ impl Renderer {
     }
 
     fn draw_alpha_target(&mut self,
-                         render_target: (TextureId, i32),
+                         //render_target: (TextureId, i32),
                          target: &AlphaRenderTarget,
                          target_size: DeviceUintSize,
                          projection: &Matrix4D<f32>) {
+        println!("TODO {:?}", target);
         {
             //let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             //self.device.bind_draw_target(Some(render_target), Some(target_size));
@@ -1141,7 +1146,7 @@ impl Renderer {
             //let mut src_color_id = self.dummy_cache_texture_id;
             //let mut src_alpha_id = self.dummy_cache_texture_id;
 
-            /*for pass in &mut frame.passes {
+            for pass in &mut frame.passes {
                 let size;
                 let clear_color;
                 let projection;
@@ -1176,7 +1181,7 @@ impl Renderer {
                 //self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
 
                 for (target_index, target) in pass.alpha_targets.targets.iter().enumerate() {
-                    self.draw_alpha_target((pass.alpha_texture_id.unwrap(), target_index as i32),
+                    self.draw_alpha_target(//(pass.alpha_texture_id.unwrap(), target_index as i32),
                                            target,
                                            *size,
                                            &projection);
@@ -1189,30 +1194,28 @@ impl Renderer {
                     self.draw_color_target(render_target,
                                            target,
                                            *size,
-                                           src_color_id,
+                                           //src_color_id,
                                            clear_color,
                                            &frame.render_task_data,
                                            &projection);
 
                 }
-
-                src_color_id = pass.color_texture_id.unwrap_or(self.dummy_cache_texture_id);
-                src_alpha_id = pass.alpha_texture_id.unwrap_or(self.dummy_cache_texture_id);
+                //src_color_id = pass.color_texture_id.unwrap_or(self.dummy_cache_texture_id);
+                //src_alpha_id = pass.alpha_texture_id.unwrap_or(self.dummy_cache_texture_id);
 
                 // Return the texture IDs to the pool for next frame.
-                if let Some(texture_id) = pass.color_texture_id.take() {
+                /*if let Some(texture_id) = pass.color_texture_id.take() {
                     self.color_render_targets.push(texture_id);
                 }
                 if let Some(texture_id) = pass.alpha_texture_id.take() {
                     self.alpha_render_targets.push(texture_id);
-                }
-            }*/
+                }*/
+            }
 
             //self.color_render_targets.reverse();
             //self.alpha_render_targets.reverse();
             //self.draw_render_target_debug(framebuffer_size);
         }
-
         self.unlock_external_images();
     }
 
