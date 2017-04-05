@@ -45,12 +45,17 @@ extern crate bitflags;
 #[macro_use]
 extern crate thread_profiler;
 
+extern crate glutin;
+#[macro_use]
+extern crate gfx;
+extern crate gfx_window_glutin;
+#[macro_use]
+extern crate gfx_core;
+extern crate gfx_device_gl;
+
 mod batch_builder;
 mod clip_scroll_node;
 mod clip_scroll_tree;
-mod debug_colors;
-mod debug_font_data;
-mod debug_render;
 mod device;
 mod frame;
 mod frame_builder;
@@ -60,7 +65,6 @@ mod gpu_store;
 mod internal_types;
 mod mask_cache;
 mod prim_store;
-mod profiler;
 mod record;
 mod render_backend;
 mod render_task;

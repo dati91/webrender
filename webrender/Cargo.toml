@@ -30,6 +30,11 @@ webrender_traits = {path = "../webrender_traits"}
 bitflags = "0.7"
 gamma-lut = "0.1"
 thread_profiler = "0.1.1"
+gfx = "0.14"
+gfx_window_glutin = "0.14"
+glutin = "0.7"
+gfx_core = "0.6.0"
+gfx_device_gl = "0.13"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
