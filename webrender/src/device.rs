@@ -29,7 +29,7 @@ use gfx_core;
 use gfx::Factory;
 use gfx::texture;
 use gfx::traits::FactoryExt;
-use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
+use gfx::format::{DepthStencil as DepthFormat, Rgba32F as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
@@ -41,6 +41,16 @@ use gfx::format::TextureSurface;
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, PrimitiveGeometry};
+
+pub const VECS_PER_LAYER: usize = 13;
+pub const VECS_PER_RENDER_TASK: usize = 3;
+pub const VECS_PER_PRIM_GEOM: usize = 2;
+pub const LAYERS_MAX_SIZE: usize = 512;
+pub const RENDER_TASKS_MAX_SIZE: usize = 512;
+pub const PRIMITIVE_GEOMETRY_SIZE: usize = 512;
+pub const MAX_INSTANCE_COUNT: usize = 512;
+pub const VECS_PER_DATA_16: usize = 1;
+pub const DATA_16_LENGTH: usize = 1024;
 
 gfx_defines! {
     vertex min_vertex {
@@ -102,7 +112,7 @@ impl min_instance {
         self.layer_index = instance.layer_index;
         self.element_index = instance.sub_index;
         self.user_data = instance.user_data;
-        self.z_index = instance.z_sort_index * -1;
+        self.z_index = instance.z_sort_index;
     }
 }
 
@@ -319,13 +329,15 @@ impl Device {
             min_vertex::new([x1, y1]),
         ];*/
 
-        let instance_count = 2;
+        let instance_count = MAX_INSTANCE_COUNT;
         let upload = factory.create_upload_buffer(instance_count as usize).unwrap();
         {
             let mut writer = factory.write_mapping(&upload).unwrap();
-            println!("writer len: {}", writer.len());
-            writer[0] = min_instance::new();
-            writer[1] = min_instance::new();
+
+            //writer[0] = min_instance::new();
+            for i in 0..instance_count {
+                writer[i] = min_instance::new();
+            }
         }
 
         let instances = factory
@@ -335,11 +347,15 @@ impl Device {
                            gfx::TRANSFER_DST).unwrap();
 
         let (vertex_buffer, mut slice) = factory.create_vertex_buffer_with_slice(&min_quad_vertices, quad_indices);
-        slice.instances = Some((instance_count, 0));
-        let layers_tex = Texture::empty(&mut factory, [13, 6]).unwrap();
-        let render_tasks_tex = Texture::empty(&mut factory, [3, 1]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [2, 2]).unwrap();
-        let data16_tex = Texture::empty(&mut factory, [16, 16]).unwrap();
+        slice.instances = Some((instance_count as u32, 0));
+        /*let layers_tex = Texture::empty(&mut factory, [VECS_PER_LAYER as u32, LAYERS_MAX_SIZE as u32]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [VECS_PER_RENDER_TASK as u32, RENDER_TASKS_MAX_SIZE as u32]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [VECS_PER_PRIM_GEOM as u32, PRIMITIVE_GEOMETRY_SIZE as u32]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [VECS_PER_DATA_16 as u32, DATA_16_LENGTH as u32]).unwrap();*/
+        let layers_tex = Texture::empty(&mut factory, [(1024 / VECS_PER_LAYER) as u32, 1]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [(1024/VECS_PER_RENDER_TASK) as u32, 1]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [(1024/VECS_PER_PRIM_GEOM) as u32, 2]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [(1024/VECS_PER_DATA_16 as u32), 1]).unwrap();
 
         let data = min_primitive::Data {
             transform: [[0f32;4];4],
@@ -386,6 +402,7 @@ impl Device {
             self.encoder.clear_depth(&self.data.out_depth, depth);
         }
     }
+
     pub fn update(&mut self, frame: &mut Frame) {
         println!("update!");
         println!("gpu_data16.len {}", frame.gpu_data16.len());
@@ -398,18 +415,15 @@ impl Device {
         println!("render_task_data.len {}", frame.render_task_data.len());
         println!("gpu_gradient_data.len {}", frame.gpu_gradient_data.len());
         println!("device_pixel_ratio: {}", frame.device_pixel_ratio);
-        if frame.render_task_data.len() == 1 {
-            println!("{:?}", frame.render_task_data);
-            println!("{:?}", frame.layer_texture_data);
-            println!("{:?}", frame.gpu_geometry[0]);
-            println!("{:?}", frame.gpu_geometry[1]);
-            //println!("{:?}", frame.gpu_data16.data);
-        }
-        Device::update_texture_f32(&mut self.encoder, &self.data16, unsafe { mem::transmute(frame.gpu_data16.as_slice()) });
         Device::update_texture_f32(&mut self.encoder, &self.layers, Device::convert_layer(frame.layer_texture_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.render_tasks, Device::convert_render_task(frame.render_task_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.prim_geo, Device::convert_prim_geo(frame.gpu_geometry.clone()).as_slice());
-        //self.draw();
+        Device::update_texture_f32(&mut self.encoder, &self.data16, Device::convert_data16(frame.gpu_data16.clone()).as_slice());
+    }
+
+    pub fn flush(&mut self) {
+        println!("flush");
+        self.encoder.flush(&mut self.device);
     }
 
     pub fn draw(&mut self, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance]) {
@@ -419,19 +433,19 @@ impl Device {
         self.data.transform = proj.to_row_arrays();
         {
             let mut writer = self.factory.write_mapping(&self.upload).unwrap();
-            println!("writer! {}", writer.len());
+            println!("writer: {} instances: {}", writer.len(), instances.len());
             for (i, inst) in instances.iter().enumerate() {
-                println!("instance[{}]: {:?}", i, inst);
+                //println!("instance[{}]: {:?}", i, inst);
                 writer[i].update(inst);
-                println!("{:?}", writer[i]);
+                println!("instance[{}]: {:?}", i, writer[i]);
             }
             //writer[0].update(&instances[0]);
+            self.slice.instances = Some((instances.len() as u32, 0));
         }
         //println!("upload {:?}", &self.upload);
         println!("copy");
         self.encoder.copy_buffer(&self.upload, &self.data.ibuf,
                             0, 0, self.upload.len()).unwrap();
-        println!("draw & flush");
         /*println!("vbuf {:?}", self.data.vbuf.get_info());
         println!("ibuf {:?}", self.data.ibuf);
         println!("layers {:?}", self.layers);
@@ -439,25 +453,6 @@ impl Device {
         println!("prim_geo {:?}", self.prim_geo);
         println!("data16 {:?}", self.data16);*/
         self.encoder.draw(&self.slice, &self.pso, &self.data);
-        self.encoder.flush(&mut self.device);
-    }
-
-    pub fn update_texture_f32(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba32F>, memory: &[f32]) {
-        let tex = &texture.surface;
-        let (width, height) = texture.get_size();
-        let img_info = gfx::texture::ImageInfoCommon {
-            xoffset: 0,
-            yoffset: 0,
-            zoffset: 0,
-            width: width as u16,
-            height: height as u16,
-            depth: 0,
-            format: (),
-            mipmap: 0,
-        };
-
-        let data = gfx::memory::cast_slice(memory);
-        encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
     pub fn update_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
@@ -478,13 +473,35 @@ impl Device {
         encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
     }
 
+    pub fn update_texture_f32(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba32F>, memory: &[f32]) {
+        let tex = &texture.surface;
+        let (width, height) = texture.get_size();
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let data = gfx::memory::cast_slice(memory);
+        encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
+    }
+
     fn convert_data16(data16: Vec<GpuBlock16>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for d in data16 {
-            println!("{:?}", d.data);
-            data.append(& mut d.data.to_vec());
+            if data.len() <= 24 {
+                println!("{:?}", d.data);
+            }
+            //println!("{:?}", d.data);
+            data.append(&mut d.data.to_vec());
         }
         println!("convert_data16 len {:?}", data.len());
+        assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
         data
     }
 
@@ -492,16 +509,20 @@ impl Device {
         let mut data: Vec<f32> = vec!();
         for l in layers {
             println!("{:?}", l);
-            data.append(& mut l.transform.to_row_major_array().to_vec());
-            data.append(& mut l.inv_transform.to_row_major_array().to_vec());
-            data.append(& mut l.local_clip_rect.origin.to_array().to_vec());
-            data.append(& mut l.local_clip_rect.size.to_array().to_vec());
-            data.append(& mut l.screen_vertices[0].to_array().to_vec());
-            data.append(& mut l.screen_vertices[1].to_array().to_vec());
-            data.append(& mut l.screen_vertices[2].to_array().to_vec());
-            data.append(& mut l.screen_vertices[3].to_array().to_vec());
+            data.append(&mut l.transform.to_row_major_array().to_vec());
+            data.append(&mut l.inv_transform.to_row_major_array().to_vec());
+            data.append(&mut l.local_clip_rect.origin.to_array().to_vec());
+            data.append(&mut l.local_clip_rect.size.to_array().to_vec());
+            data.append(&mut l.screen_vertices[0].to_array().to_vec());
+            data.append(&mut l.screen_vertices[1].to_array().to_vec());
+            data.append(&mut l.screen_vertices[2].to_array().to_vec());
+            data.append(&mut l.screen_vertices[3].to_array().to_vec());
         }
         println!("convert_layer len {:?}", data.len());
+        //let mut zeros = vec![0f32; (VECS_PER_LAYER * LAYERS_MAX_SIZE) * 4 - data.len()];
+        let mut zeros = vec![0f32; (((1024 / VECS_PER_LAYER) as usize) * 4 - data.len())];
+        data.append(&mut zeros);
+        assert!(data.len() == 4 * (1024 / VECS_PER_LAYER) as usize);
         data
     }
 
@@ -509,26 +530,33 @@ impl Device {
         let mut data: Vec<f32> = vec!();
         for rt in render_tasks {
             println!("{:?}", rt);
-            data.append(& mut rt.data.to_vec());
+            data.append(&mut rt.data.to_vec());
         }
         println!("convert_render_task len {:?}", data.len());
+        //let mut zeros = vec![0f32; (VECS_PER_RENDER_TASK * RENDER_TASKS_MAX_SIZE) * 4 - data.len()];
+        let mut zeros = vec![0f32; (((1024 / VECS_PER_RENDER_TASK) as usize) * 4 - data.len())];
+        data.append(&mut zeros);
+        assert!(data.len() == 4 * (1024 / VECS_PER_RENDER_TASK) as usize);
         data
     }
 
     fn convert_prim_geo(prim_geo: Vec<PrimitiveGeometry>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for pg in prim_geo {
-            if data.len() == 16 {
-                break;
+            if data.len() <= 64 {
+                println!("pg {:?}", pg);
             }
-            println!("pg {:?}", pg);
-            data.append(& mut pg.local_rect.origin.to_array().to_vec());
-            data.append(& mut pg.local_rect.size.to_array().to_vec());
-            data.append(& mut pg.local_clip_rect.origin.to_array().to_vec());
-            data.append(& mut pg.local_clip_rect.size.to_array().to_vec());
-            println!("data: {:?}", data);
+            data.append(&mut pg.local_rect.origin.to_array().to_vec());
+            data.append(&mut pg.local_rect.size.to_array().to_vec());
+            data.append(&mut pg.local_clip_rect.origin.to_array().to_vec());
+            data.append(&mut pg.local_clip_rect.size.to_array().to_vec());
+            //println!("data: {:?}", data);
         }
         println!("convert_prim_geo len {:?}", data.len());
+        //let mut zeros = vec![0f32; (VECS_PER_PRIM_GEOM * PRIMITIVE_GEOMETRY_SIZE) * 4 - data.len()];
+        let mut zeros = vec![0f32; (((2 * 1024 / VECS_PER_PRIM_GEOM) as usize) * 4 - data.len())];
+        data.append(&mut zeros);
+        assert!(data.len() == 4 * (2*1024 / VECS_PER_PRIM_GEOM) as usize);
         data
     }
 }

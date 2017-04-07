@@ -324,7 +324,7 @@ fn main() {
     builder.push_rect(
         LayoutRect::new(LayoutPoint::new(100.0, 250.0), LayoutSize::new(250.0, 200.0)),
         ClipRegion::simple(&bounds),
-        ColorF::new(1.0, 1.0, 0.0, 1.0)
+        ColorF::new(0.0, 0.75, 1.0, 1.0)
     );
 
     if false { // draw text?

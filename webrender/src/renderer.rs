@@ -477,6 +477,7 @@ impl Renderer {
                 //self.update_texture_cache();
                 self.draw_tile_frame(frame, &framebuffer_size);
                 //self.device.end_frame();
+                self.device.flush();
             }
 
             // Restore frame - avoid borrow checker!
@@ -651,10 +652,15 @@ impl Renderer {
         debug_assert!(!needs_clipping ||
                       batch.key.blend_mode == BlendMode::Alpha ||
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
-
+        println!("submit batch kind: {:?}", batch.key.kind);
         match batch.data {
             PrimitiveBatchData::Instances(ref data) => {
-                self.device.draw(projection, data);
+                match batch.key.kind {
+                    AlphaBatchKind::Rectangle => {
+                        self.device.draw(projection, data);
+                    },
+                    _ => (),
+                }
             },
             _ => {}
             /*PrimitiveBatchData::Instances(ref data) => {
@@ -806,7 +812,6 @@ impl Renderer {
                          render_task_data: &Vec<RenderTaskData>,
                          projection: &Matrix4D<f32>) {
         {
-            println!("TODO {:?}", target);
             //self.device.bind_draw_target(render_target, Some(target_size));
             //self.device.disable_depth();
             //self.device.enable_depth_write();
@@ -906,6 +911,7 @@ impl Renderer {
         self.device.enable_depth_write();*/
 
         for batch in &target.alpha_batcher.opaque_batches {
+            println!("in opaque_batches submitting batch");
             self.submit_batch(batch,
                               &projection,
                               render_task_data,
@@ -955,7 +961,7 @@ impl Renderer {
                          target: &AlphaRenderTarget,
                          target_size: DeviceUintSize,
                          projection: &Matrix4D<f32>) {
-        println!("TODO {:?}", target);
+        println!("TODO draw_alpha_target");//{:?}", target);
         {
             //let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             //self.device.bind_draw_target(Some(render_target), Some(target_size));
@@ -1142,6 +1148,8 @@ impl Renderer {
             // number of driver stalls.
             //self.gpu_data_textures[self.gdt_index].init_frame(&mut self.device, frame);
             //self.gdt_index = (self.gdt_index + 1) % GPU_DATA_TEXTURE_POOL;
+
+            self.device.update(frame);
 
             //let mut src_color_id = self.dummy_cache_texture_id;
             //let mut src_alpha_id = self.dummy_cache_texture_id;
