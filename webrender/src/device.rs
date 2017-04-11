@@ -395,7 +395,10 @@ impl Device {
                         depth: Option<f32>) {
         if let Some(color) = color {
             println!("clear:{:?}", color);
-            self.encoder.clear(&self.data.out_color, color);
+            self.encoder.clear(&self.data.out_color, [color[0].powf(2.2),
+                                                      color[1].powf(2.2),
+                                                      color[2].powf(2.2),
+                                                      color[3].powf(2.2)]);
         }
 
         if let Some(depth) = depth {

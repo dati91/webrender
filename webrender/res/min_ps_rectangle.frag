@@ -20,6 +20,6 @@ varying vec4 vColor;
 
 void main(void) {
     float alpha = 1.0;
-
-    oFragColor = vColor * vec4(1.0, 1.0, 1.0, alpha);
+    vec4 vColor_pow = vec4(pow(vColor.x, 2.2), pow(vColor.y, 2.2), pow(vColor.z, 2.2), alpha);
+    oFragColor = vColor_pow * vec4(1.0, 1.0, 1.0, alpha);
 }
