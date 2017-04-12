@@ -236,7 +236,7 @@ fn main() {
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender) = webrender::renderer::Renderer::new(gl, opts, size).unwrap();
+    let (mut renderer, sender) = webrender::renderer::Renderer::new(&window, opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));
@@ -322,6 +322,11 @@ fn main() {
                         border_widths,
                         border_details);
 
+    builder.push_rect(
+        LayoutRect::new(LayoutPoint::new(100.0, 250.0), LayoutSize::new(250.0, 200.0)),
+        ClipRegion::simple(&bounds),
+        ColorF::new(0.0, 0.75, 1.0, 1.0)
+    );
 
     if false { // draw text?
         let font_key = api.generate_font_key();
@@ -391,29 +396,6 @@ fn main() {
                           None);
     }
 
-    if false { // draw box shadow?
-        let rect = LayoutRect::new(LayoutPoint::new(0.0, 0.0), LayoutSize::new(0.0, 0.0));
-        let simple_box_bounds = LayoutRect::new(LayoutPoint::new(20.0, 200.0),
-                                                LayoutSize::new(50.0, 50.0));
-        let offset = LayoutPoint::new(0.0, 0.0);
-        let color = ColorF::new(1.0, 1.0, 1.0, 1.0);
-        let blur_radius = 5.0;
-        let spread_radius = 0.0;
-        let simple_border_radius = 20.0;
-        let box_shadow_type = BoxShadowClipMode::Inset;
-        let full_screen_clip = builder.new_clip_region(&bounds, Vec::new(), None);
-
-        builder.push_box_shadow(rect,
-                                full_screen_clip,
-                                simple_box_bounds,
-                                offset,
-                                color,
-                                blur_radius,
-                                spread_radius,
-                                simple_border_radius,
-                                box_shadow_type);
-    }
-
     builder.pop_stacking_context();
 
     api.set_display_list(
@@ -440,12 +422,6 @@ fn main() {
                 glutin::Event::Closed |
                 glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Escape)) |
                 glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Q)) => break 'outer,
-                glutin::Event::KeyboardInput(glutin::ElementState::Pressed,
-                                             _, Some(glutin::VirtualKeyCode::P)) => {
-                    let enable_profiler = !renderer.get_profiler_enabled();
-                    renderer.set_profiler_enabled(enable_profiler);
-                    api.generate_frame(None);
-                }
                 glutin::Event::Touch(touch) => {
                     match touch_state.handle_event(touch) {
                         TouchResult::Pan(pan) => {

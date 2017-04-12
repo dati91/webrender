@@ -5,7 +5,6 @@
 use frame::Frame;
 use frame_builder::FrameBuilderConfig;
 use internal_types::{FontTemplate, SourceTexture, ResultMsg, RendererFrame};
-use profiler::{BackendProfileCounters, TextureCacheProfileCounters};
 use record::ApiRecordingReceiver;
 use resource_cache::ResourceCache;
 use scene::Scene;
@@ -110,7 +109,7 @@ impl RenderBackend {
         }
     }
 
-    pub fn run(&mut self, mut profile_counters: BackendProfileCounters) {
+    pub fn run(&mut self) {
         let mut frame_counter: u32 = 0;
 
         loop {
@@ -123,7 +122,6 @@ impl RenderBackend {
                     }
                     match msg {
                         ApiMsg::AddRawFont(id, bytes) => {
-                            profile_counters.font_templates.inc(bytes.len());
                             self.resource_cache
                                 .add_font_template(id, FontTemplate::Raw(Arc::new(bytes)));
                         }
@@ -143,9 +141,6 @@ impl RenderBackend {
                             tx.send(glyph_dimensions).unwrap();
                         }
                         ApiMsg::AddImage(id, descriptor, data, tiling) => {
-                            if let ImageData::Raw(ref bytes) = data {
-                                profile_counters.image_templates.inc(bytes.len());
-                            }
                             self.resource_cache.add_image_template(id, descriptor, data, tiling);
                         }
                         ApiMsg::UpdateImage(id, descriptor, bytes, dirty_rect) => {
@@ -212,15 +207,13 @@ impl RenderBackend {
                             if !preserve_frame_state {
                                 self.discard_frame_state_for_pipeline(pipeline_id);
                             }
-                            profile_counters.total_time.profile(|| {
-                                self.scene.set_display_list(pipeline_id,
-                                                            epoch,
-                                                            built_display_list,
-                                                            background_color,
-                                                            viewport_size,
-                                                            auxiliary_lists);
-                                self.build_scene();
-                            })
+                            self.scene.set_display_list(pipeline_id,
+                                                        epoch,
+                                                        built_display_list,
+                                                        background_color,
+                                                        viewport_size,
+                                                        auxiliary_lists);
+                            self.build_scene();
                         }
                         ApiMsg::SetRootPipeline(pipeline_id) => {
                             profile_scope!("SetRootPipeline");
@@ -230,26 +223,21 @@ impl RenderBackend {
                                 continue;
                             }
 
-                            profile_counters.total_time.profile(|| {
-                                self.build_scene();
-                            })
+                            self.build_scene();
                         }
                         ApiMsg::Scroll(delta, cursor, move_phase) => {
                             profile_scope!("Scroll");
                             let frame = {
-                                let counters = &mut profile_counters.texture_cache;
-                                profile_counters.total_time.profile(|| {
-                                    if self.frame.scroll(delta, cursor, move_phase) {
-                                        Some(self.render(counters))
-                                    } else {
-                                        None
-                                    }
-                                })
+                                if self.frame.scroll(delta, cursor, move_phase) {
+                                    Some(self.render())
+                                } else {
+                                    None
+                                }
                             };
 
                             match frame {
                                 Some(frame) => {
-                                    self.publish_frame(frame, &mut profile_counters);
+                                    self.publish_frame(frame);
                                     self.notify_compositor_of_new_scroll_frame(true)
                                 }
                                 None => self.notify_compositor_of_new_scroll_frame(false),
@@ -258,19 +246,16 @@ impl RenderBackend {
                         ApiMsg::ScrollLayerWithId(origin, id) => {
                             profile_scope!("ScrollLayerWithScrollId");
                             let frame = {
-                                let counters = &mut profile_counters.texture_cache;
-                                profile_counters.total_time.profile(|| {
-                                    if self.frame.scroll_nodes(origin, id) {
-                                        Some(self.render(counters))
-                                    } else {
-                                        None
-                                    }
-                                })
+                                if self.frame.scroll_nodes(origin, id) {
+                                    Some(self.render())
+                                } else {
+                                    None
+                                }
                             };
 
                             match frame {
                                 Some(frame) => {
-                                    self.publish_frame(frame, &mut profile_counters);
+                                    self.publish_frame(frame);
                                     self.notify_compositor_of_new_scroll_frame(true)
                                 }
                                 None => self.notify_compositor_of_new_scroll_frame(false),
@@ -280,14 +265,11 @@ impl RenderBackend {
                         ApiMsg::TickScrollingBounce => {
                             profile_scope!("TickScrollingBounce");
                             let frame = {
-                                let counters = &mut profile_counters.texture_cache;
-                                profile_counters.total_time.profile(|| {
-                                    self.frame.tick_scrolling_bounce_animations();
-                                    self.render(counters)
-                                })
+                                self.frame.tick_scrolling_bounce_animations();
+                                self.render()
                             };
 
-                            self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
+                            self.publish_frame_and_notify_compositor(frame);
                         }
                         ApiMsg::TranslatePointToLayerSpace(..) => {
                             panic!("unused api - remove from webrender_traits");
@@ -375,19 +357,14 @@ impl RenderBackend {
                             //           rebuild of the frame!
                             if let Some(property_bindings) = property_bindings {
                                 self.scene.properties.set_properties(property_bindings);
-                                profile_counters.total_time.profile(|| {
-                                    self.build_scene();
-                                });
+                                self.build_scene();
                             }
 
                             let frame = {
-                                let counters = &mut profile_counters.texture_cache;
-                                profile_counters.total_time.profile(|| {
-                                    self.render(counters)
-                                })
+                                self.render()
                             };
                             if self.scene.root_pipeline_id.is_some() {
-                                self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
+                                self.publish_frame_and_notify_compositor(frame);
                                 frame_counter += 1;
                             }
                         }
@@ -456,8 +433,7 @@ impl RenderBackend {
                           accumulated_scale_factor);
     }
 
-    fn render(&mut self,
-              texture_cache_profile: &mut TextureCacheProfileCounters)
+    fn render(&mut self)
               -> RendererFrame {
         let accumulated_scale_factor = self.accumulated_scale_factor();
         let pan = LayerPoint::new(self.pan.x as f32 / accumulated_scale_factor,
@@ -465,25 +441,21 @@ impl RenderBackend {
         let frame = self.frame.build(&mut self.resource_cache,
                                      &self.scene.pipeline_auxiliary_lists,
                                      accumulated_scale_factor,
-                                     pan,
-                                     texture_cache_profile);
+                                     pan);
         frame
     }
 
     fn publish_frame(&mut self,
-                     frame: RendererFrame,
-                     profile_counters: &mut BackendProfileCounters) {
+                     frame: RendererFrame) {
         let pending_update = self.resource_cache.pending_updates();
         let pending_external_image_update = self.resource_cache.pending_external_image_updates();
-        let msg = ResultMsg::NewFrame(frame, pending_update, pending_external_image_update, profile_counters.clone());
+        let msg = ResultMsg::NewFrame(frame, pending_update, pending_external_image_update);
         self.result_tx.send(msg).unwrap();
-        profile_counters.reset();
     }
 
     fn publish_frame_and_notify_compositor(&mut self,
-                                           frame: RendererFrame,
-                                           profile_counters: &mut BackendProfileCounters) {
-        self.publish_frame(frame, profile_counters);
+                                           frame: RendererFrame) {
+        self.publish_frame(frame);
 
         // TODO(gw): This is kindof bogus to have to lock the notifier
         //           each time it's used. This is due to some nastiness

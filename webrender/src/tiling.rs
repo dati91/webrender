@@ -12,7 +12,6 @@ use mask_cache::MaskCacheInfo;
 use prim_store::{CLIP_DATA_GPU_SIZE, DeferredResolve, GpuBlock128, GpuBlock16, GpuBlock32};
 use prim_store::{GpuBlock64, GradientData, PrimitiveCacheKey, PrimitiveGeometry, PrimitiveIndex};
 use prim_store::{PrimitiveKind, PrimitiveMetadata, PrimitiveStore, TexelRect};
-use profiler::FrameProfileCounters;
 use render_task::{AlphaRenderItem, MaskGeometryKind, MaskSegment, RenderTask, RenderTaskData};
 use render_task::{RenderTaskId, RenderTaskIndex, RenderTaskKey, RenderTaskKind};
 use render_task::RenderTaskLocation;
@@ -517,6 +516,7 @@ impl Default for PrimitiveGeometry {
     }
 }
 
+#[derive(Debug)]
 struct AlphaBatchTask {
     task_id: RenderTaskId,
     opaque_items: Vec<AlphaRenderItem>,
@@ -524,6 +524,7 @@ struct AlphaBatchTask {
 }
 
 /// Encapsulates the logic of building batches for items that are blended.
+#[derive(Debug)]
 pub struct AlphaBatcher {
     pub alpha_batches: Vec<PrimitiveBatch>,
     pub opaque_batches: Vec<PrimitiveBatch>,
@@ -874,6 +875,7 @@ pub struct RenderTargetContext<'a> {
     pub resource_cache: &'a ResourceCache,
 }
 
+#[derive(Debug)]
 struct TextureAllocator {
     // TODO(gw): Replace this with a simpler allocator for
     // render target allocation - this use case doesn't need
@@ -996,6 +998,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
 }
 
 /// A render target represents a number of rendering operations on a surface.
+#[derive(Debug)]
 pub struct ColorRenderTarget {
     pub alpha_batcher: AlphaBatcher,
     pub box_shadow_cache_prims: Vec<PrimitiveInstance>,
@@ -1426,13 +1429,13 @@ pub struct CacheClipInstance {
 
 #[derive(Debug, Clone)]
 pub struct PrimitiveInstance {
-    global_prim_id: i32,
-    prim_address: GpuStoreAddress,
+    pub global_prim_id: i32,
+    pub prim_address: GpuStoreAddress,
     pub task_index: i32,
-    clip_task_index: i32,
-    layer_index: i32,
-    sub_index: i32,
-    z_sort_index: i32,
+    pub clip_task_index: i32,
+    pub layer_index: i32,
+    pub sub_index: i32,
+    pub z_sort_index: i32,
     pub user_data: [i32; 2],
 }
 
@@ -1691,7 +1694,6 @@ pub struct Frame {
     pub device_pixel_ratio: f32,
     pub cache_size: DeviceUintSize,
     pub passes: Vec<RenderPass>,
-    pub profile_counters: FrameProfileCounters,
 
     pub layer_texture_data: Vec<PackedLayer>,
     pub render_task_data: Vec<RenderTaskData>,
@@ -1709,4 +1711,3 @@ pub struct Frame {
     // patch the data structures.
     pub deferred_resolves: Vec<DeferredResolve>,
 }
-
