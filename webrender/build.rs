@@ -75,7 +75,8 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
         let is_vert = filename.ends_with(".vs");
         let is_frag = filename.ends_with(".fs");
         let is_ps_rect = filename.starts_with("ps_rectangle");
-        let is_text_run = filename.starts_with("ps_text_run");
+        let is_ps_text_run = filename.starts_with("ps_text_run");
+        let is_ps_image = filename.starts_with("ps_image");
         // The shader must be primitive or clip (only one of them)
         // and it must be fragment or vertex shader (only one of them), else we skip it.
         if !(is_prim ^ is_clip) || !(is_vert ^ is_frag) {
@@ -104,9 +105,14 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
             build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_CLIP\n");
         }
 
-        if is_text_run {
+        if is_ps_text_run {
             build_configs.push("#define WR_FEATURE_TRANSFORM\n#define WR_FEATURE_SUBPIXEL_AA\n");
             build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_SUBPIXEL_AA\n");
+        }
+
+        if is_ps_image {
+            build_configs.push("#define WR_FEATURE_TRANSFORM\n#define WR_FEATURE_TEXTURE_RECT\n");
+            build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_TEXTURE_RECT\n");
         }
 
         for (iter, config_prefix) in build_configs.iter().enumerate() {
@@ -141,16 +147,22 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
                     if is_ps_rect {
                         file_name.push_str("_clip_transform");
                     }
-                    if is_text_run {
+                    if is_ps_text_run {
                         file_name.push_str("_subpixel_transform");
+                    }
+                    if is_ps_image {
+                        file_name.push_str("_rect_transform");
                     }
                 },
                 3 => {
                     if is_ps_rect {
                         file_name.push_str("_clip");
                     }
-                    if is_text_run {
+                    if is_ps_text_run {
                         file_name.push_str("_subpixel");
+                    }
+                    if is_ps_image {
+                        file_name.push_str("_rect");
                     }
                 },
                 _ => unreachable!(),
