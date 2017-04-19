@@ -660,9 +660,190 @@ impl Renderer {
 
         match batch.key.kind {
             AlphaBatchKind::Rectangle => {
-                self.device.draw(&ProgramId::PS_RECTANGLE, projection, &batch.instances);
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        if needs_clipping {
+                            self.device.draw(&ProgramId::PS_RECTANGLE_CLIP, projection, &batch.instances);
+                        } else {
+                            self.device.draw(&ProgramId::PS_RECTANGLE, projection, &batch.instances);
+                        }
+                    },
+                    TransformedRectKind::Complex => {
+                        if needs_clipping {
+                            self.device.draw(&ProgramId::PS_RECTANGLE_CLIP_TRANSFORM, projection, &batch.instances);
+                        } else {
+                            self.device.draw(&ProgramId::PS_RECTANGLE_TRANSFORM, projection, &batch.instances);
+                        }
+                    },
+                }
             },
-            _ => (),
+            AlphaBatchKind::Composite => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_COMPOSITE, projection, &batch.instances);
+                    },
+                    // TODO: May remove this case?
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_COMPOSITE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::HardwareComposite => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_HARDWARE_COMPOSITE, projection, &batch.instances);
+                    },
+                    // TODO: May remove this case?
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_HARDWARE_COMPOSITE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::Blend => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_BLEND, projection, &batch.instances);
+                    },
+                    // TODO: May remove this case?
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_BLEND_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::TextRun => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        match batch.key.blend_mode {
+                            BlendMode::Subpixel(..) => {
+                                self.device.draw(&ProgramId::PS_TEXT_RUN_SUBPIXEL, projection, &batch.instances);
+                            },
+                            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::None => {
+                                self.device.draw(&ProgramId::PS_TEXT_RUN, projection, &batch.instances);
+                            },
+                        }
+                    },
+                    TransformedRectKind::Complex => {
+                        match batch.key.blend_mode {
+                            BlendMode::Subpixel(..) => {
+                                self.device.draw(&ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM, projection, &batch.instances);
+                            },
+                            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::None => {
+                                self.device.draw(&ProgramId::PS_TEXT_RUN_TRANSFORM, projection, &batch.instances);
+                            },
+                        }
+                    },
+                }
+            },
+            AlphaBatchKind::Image => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_IMAGE, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_IMAGE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::ImageRect => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_IMAGE_RECT, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_IMAGE_RECT_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::YuvImage => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_YUV_IMAGE, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_YUV_IMAGE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::Border => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_BORDER, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_BORDER_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::BorderCorner => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_BORDER_CORNER, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_BORDER_CORNER_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::BorderEdge => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_BORDER_EDGE, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_BORDER_EDGE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::AlignedGradient => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_GRADIENT, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_GRADIENT_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::AngleGradient => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_ANGLE_GRADIENT, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_ANGLE_GRADIENT_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::RadialGradient => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_RADIAL_GRADIENT, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_RADIAL_GRADIENT_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::BoxShadow => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_BOX_SHADOW, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_BOX_SHADOW_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
+            AlphaBatchKind::CacheImage => {
+                match transform_kind {
+                    TransformedRectKind::AxisAligned => {
+                        self.device.draw(&ProgramId::PS_CACHE_IMAGE, projection, &batch.instances);
+                    },
+                    TransformedRectKind::Complex => {
+                        self.device.draw(&ProgramId::PS_CACHE_IMAGE_TRANSFORM, projection, &batch.instances);
+                    },
+                }
+            },
         }
 
         /*let (marker, shader) = match batch.key.kind {

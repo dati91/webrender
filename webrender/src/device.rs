@@ -58,10 +58,52 @@ pub const DATA_16_LENGTH: usize = 4096;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ProgramId {
+    CS_BLUR,
+    CS_BOX_SHADOW,
+    CS_CLIP_IMAGE,
+    CS_CLIP_RECTANGLE,
+    CS_TEXT_RUN,
+    PS_ANGLE_GRADIENT,
+    PS_ANGLE_GRADIENT_TRANSFORM,
+    PS_BLEND,
+    // TODO: May remove this shader?
+    PS_BLEND_TRANSFORM,
+    PS_BORDER,
+    PS_BORDER_TRANSFORM,
+    PS_BORDER_CORNER,
+    PS_BORDER_CORNER_TRANSFORM,
+    PS_BORDER_EDGE,
+    PS_BORDER_EDGE_TRANSFORM,
+    PS_BOX_SHADOW,
+    PS_BOX_SHADOW_TRANSFORM,
+    PS_CACHE_IMAGE,
+    PS_CACHE_IMAGE_TRANSFORM,
+    PS_CLEAR,
+    PS_CLEAR_TRANSFORM,
+    PS_COMPOSITE,
+    // TODO: May remove this shader?
+    PS_COMPOSITE_TRANSFORM,
+    PS_GRADIENT,
+    PS_GRADIENT_TRANSFORM,
+    PS_HARDWARE_COMPOSITE,
+    // TODO: May remove this shader?
+    PS_HARDWARE_COMPOSITE_TRANSFORM,
+    PS_IMAGE,
+    PS_IMAGE_TRANSFORM,
+    PS_IMAGE_RECT,
+    PS_IMAGE_RECT_TRANSFORM,
+    PS_RADIAL_GRADIENT,
+    PS_RADIAL_GRADIENT_TRANSFORM,
     PS_RECTANGLE,
     PS_RECTANGLE_TRANSFORM,
     PS_RECTANGLE_CLIP,
     PS_RECTANGLE_CLIP_TRANSFORM,
+    PS_TEXT_RUN,
+    PS_TEXT_RUN_TRANSFORM,
+    PS_TEXT_RUN_SUBPIXEL,
+    PS_TEXT_RUN_SUBPIXEL_TRANSFORM,
+    PS_YUV_IMAGE,
+    PS_YUV_IMAGE_TRANSFORM,
 }
 
 gfx_defines! {
@@ -523,7 +565,7 @@ impl Device {
             println!("data16 {:?}", self.data16);*/
             self.encoder.draw(&program.slice, &program.pso, &program.data);
         } else {
-            unreachable!();
+            println!("Shader not yet implemented {:?}",  program_id);
         }
     }
 
