@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use fnv::FnvHasher;
-use profiler::IpcProfileCounters;
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use tiling::AuxiliaryListsMap;
@@ -121,8 +120,7 @@ impl Scene {
                             built_display_list: BuiltDisplayList,
                             background_color: Option<ColorF>,
                             viewport_size: LayerSize,
-                            auxiliary_lists: AuxiliaryLists,
-                            profile_counters: &mut IpcProfileCounters) {
+                            auxiliary_lists: AuxiliaryLists) {
 
         let display_list_len = built_display_list.data().len();
         let aux_list_len = auxiliary_lists.data().len();
@@ -134,10 +132,6 @@ impl Scene {
         self.display_lists.insert(pipeline_id, built_display_list.into_display_items());
 
         let deserial_end_time = precise_time_ns();
-
-        profile_counters.set(serial_start_time, serial_end_time, 
-                             deserial_start_time, deserial_end_time,
-                             display_list_len, aux_list_len);
 
         let new_pipeline = ScenePipeline {
             pipeline_id: pipeline_id,

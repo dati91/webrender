@@ -12,7 +12,6 @@ use prim_store::{ImagePrimitiveKind, PrimitiveContainer, PrimitiveGeometry, Prim
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu, RadialGradientPrimitiveGpu};
 use prim_store::{RectanglePrimitive, TextRunPrimitiveCpu, TextRunPrimitiveGpu};
 use prim_store::{BoxShadowPrimitiveGpu, TexelRect, YuvImagePrimitiveCpu, YuvImagePrimitiveGpu};
-use profiler::{FrameProfileCounters, TextureCacheProfileCounters};
 use render_task::{AlphaRenderItem, MaskCacheKey, MaskResult, RenderTask, RenderTaskIndex};
 use render_task::RenderTaskLocation;
 use resource_cache::ResourceCache;
@@ -1010,7 +1009,6 @@ impl FrameBuilder {
                                                 clip_scroll_tree: &mut ClipScrollTree,
                                                 auxiliary_lists_map: &AuxiliaryListsMap,
                                                 resource_cache: &mut ResourceCache,
-                                                profile_counters: &mut FrameProfileCounters,
                                                 device_pixel_ratio: f32) {
         profile_scope!("cull");
         LayerRectCalculationAndCullingPass::create_and_run(self,
@@ -1018,7 +1016,6 @@ impl FrameBuilder {
                                                            clip_scroll_tree,
                                                            auxiliary_lists_map,
                                                            resource_cache,
-                                                           profile_counters,
                                                            device_pixel_ratio);
     }
 
@@ -1214,13 +1211,9 @@ impl FrameBuilder {
                  frame_id: FrameId,
                  clip_scroll_tree: &mut ClipScrollTree,
                  auxiliary_lists_map: &AuxiliaryListsMap,
-                 device_pixel_ratio: f32,
-                 texture_cache_profile: &mut TextureCacheProfileCounters)
+                 device_pixel_ratio: f32)
                  -> Frame {
         profile_scope!("build");
-
-        let mut profile_counters = FrameProfileCounters::new();
-        profile_counters.total_primitives.set(self.prim_store.prim_count());
 
         resource_cache.begin_frame(frame_id);
 
@@ -1242,7 +1235,6 @@ impl FrameBuilder {
                                                       clip_scroll_tree,
                                                       auxiliary_lists_map,
                                                       resource_cache,
-                                                      &mut profile_counters,
                                                       device_pixel_ratio);
 
         let (main_render_task, static_render_task_count) = self.build_render_task();
@@ -1251,7 +1243,7 @@ impl FrameBuilder {
         let mut required_pass_count = 0;
         main_render_task.max_depth(0, &mut required_pass_count);
 
-        resource_cache.block_until_all_resources_added(texture_cache_profile);
+        resource_cache.block_until_all_resources_added();
 
         for node in clip_scroll_tree.nodes.values() {
             if let NodeType::Clip(ref clip_info) = node.node_type {
@@ -1285,10 +1277,6 @@ impl FrameBuilder {
             };
 
             pass.build(&ctx, &mut render_tasks);
-
-            profile_counters.passes.inc();
-            profile_counters.color_targets.add(pass.color_targets.target_count());
-            profile_counters.alpha_targets.add(pass.alpha_targets.target_count());
         }
 
         resource_cache.end_frame();
@@ -1297,7 +1285,6 @@ impl FrameBuilder {
             device_pixel_ratio: device_pixel_ratio,
             background_color: self.background_color,
             window_size: self.screen_size,
-            profile_counters: profile_counters,
             passes: passes,
             cache_size: cache_size,
             layer_texture_data: self.packed_layers.clone(),
@@ -1321,7 +1308,6 @@ struct LayerRectCalculationAndCullingPass<'a> {
     clip_scroll_tree: &'a mut ClipScrollTree,
     auxiliary_lists_map: &'a AuxiliaryListsMap,
     resource_cache: &'a mut ResourceCache,
-    profile_counters: &'a mut FrameProfileCounters,
     device_pixel_ratio: f32,
     stacking_context_stack: Vec<StackingContextIndex>,
 
@@ -1341,7 +1327,6 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                       clip_scroll_tree: &'a mut ClipScrollTree,
                       auxiliary_lists_map: &'a AuxiliaryListsMap,
                       resource_cache: &'a mut ResourceCache,
-                      profile_counters: &'a mut FrameProfileCounters,
                       device_pixel_ratio: f32) {
 
         let mut pass = LayerRectCalculationAndCullingPass {
@@ -1350,7 +1335,6 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
             clip_scroll_tree: clip_scroll_tree,
             auxiliary_lists_map: auxiliary_lists_map,
             resource_cache: resource_cache,
-            profile_counters: profile_counters,
             device_pixel_ratio: device_pixel_ratio,
             stacking_context_stack: Vec::new(),
             current_clip_stack: Vec::new(),
@@ -1641,10 +1625,6 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
 
                 if prim_clip_info.is_some() {
                     self.current_clip_stack.pop();
-                }
-
-                if visible {
-                    self.profile_counters.visible_primitives.inc();
                 }
             }
         }
