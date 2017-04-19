@@ -23,6 +23,7 @@ use webrender_traits::{ColorF, ImageFormat};
 use webrender_traits::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
 
 use std;
+use std::env;
 use glutin;
 use gfx;
 use gfx_core;
@@ -335,8 +336,8 @@ impl Device {
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
 
         let pso = factory.create_pipeline_simple(
-            include_bytes!("../res/ps_rectangle.vert"),
-            include_bytes!("../res/ps_rectangle.frag"),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
             primitive::new()
         ).unwrap();
 
