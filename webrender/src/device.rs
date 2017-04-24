@@ -67,8 +67,6 @@ pub enum ProgramId {
     PS_ANGLE_GRADIENT,
     PS_ANGLE_GRADIENT_TRANSFORM,
     PS_BLEND,
-    // TODO: May remove this shader?
-    PS_BLEND_TRANSFORM,
     PS_BORDER,
     PS_BORDER_TRANSFORM,
     PS_BORDER_CORNER,
@@ -82,13 +80,9 @@ pub enum ProgramId {
     PS_CLEAR,
     PS_CLEAR_TRANSFORM,
     PS_COMPOSITE,
-    // TODO: May remove this shader?
-    PS_COMPOSITE_TRANSFORM,
     PS_GRADIENT,
     PS_GRADIENT_TRANSFORM,
     PS_HARDWARE_COMPOSITE,
-    // TODO: May remove this shader?
-    PS_HARDWARE_COMPOSITE_TRANSFORM,
     PS_IMAGE,
     PS_IMAGE_TRANSFORM,
     PS_IMAGE_RECT,

@@ -678,37 +678,13 @@ impl Renderer {
                 }
             },
             AlphaBatchKind::Composite => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        self.device.draw(&ProgramId::PS_COMPOSITE, projection, &batch.instances);
-                    },
-                    // TODO: May remove this case?
-                    TransformedRectKind::Complex => {
-                        self.device.draw(&ProgramId::PS_COMPOSITE_TRANSFORM, projection, &batch.instances);
-                    },
-                }
+                self.device.draw(&ProgramId::PS_COMPOSITE, projection, &batch.instances);
             },
             AlphaBatchKind::HardwareComposite => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        self.device.draw(&ProgramId::PS_HARDWARE_COMPOSITE, projection, &batch.instances);
-                    },
-                    // TODO: May remove this case?
-                    TransformedRectKind::Complex => {
-                        self.device.draw(&ProgramId::PS_HARDWARE_COMPOSITE_TRANSFORM, projection, &batch.instances);
-                    },
-                }
+                self.device.draw(&ProgramId::PS_HARDWARE_COMPOSITE, projection, &batch.instances);
             },
             AlphaBatchKind::Blend => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        self.device.draw(&ProgramId::PS_BLEND, projection, &batch.instances);
-                    },
-                    // TODO: May remove this case?
-                    TransformedRectKind::Complex => {
-                        self.device.draw(&ProgramId::PS_BLEND_TRANSFORM, projection, &batch.instances);
-                    },
-                }
+                self.device.draw(&ProgramId::PS_BLEND, projection, &batch.instances);
             },
             AlphaBatchKind::TextRun => {
                 match transform_kind {
