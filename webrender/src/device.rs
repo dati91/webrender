@@ -26,6 +26,7 @@ use std;
 use std::env;
 use glutin;
 use gfx;
+use gfx::pso::PipelineData;
 use gfx_core;
 use gfx::Factory;
 use gfx::texture;
@@ -107,11 +108,11 @@ pub enum ProgramId {
 }
 
 gfx_defines! {
-    vertex position {
+    vertex Position {
         pos: [f32; 3] = "aPosition",
     }
 
-    vertex instances {
+    vertex Instances {
         glob_prim_id: i32 = "aGlobalPrimId",
         primitive_address: i32 = "aPrimitiveAddress",
         task_index: i32 = "aTaskIndex",
@@ -125,8 +126,8 @@ gfx_defines! {
     pipeline primitive {
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<position> = (),
-        ibuf: gfx::InstanceBuffer<instances> = (),
+        vbuf: gfx::VertexBuffer<Position> = (),
+        ibuf: gfx::InstanceBuffer<Instances> = (),
 
         // FIXME: Find the correct data type for these color samplers
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
@@ -151,17 +152,17 @@ gfx_defines! {
     }
 }
 
-impl position {
-    fn new(p: [f32; 2]) -> position {
-        position {
+impl Position {
+    fn new(p: [f32; 2]) -> Position {
+        Position {
             pos: [p[0], p[1], 0.0],
         }
     }
 }
 
-impl instances {
-    fn new() -> instances {
-        instances {
+impl Instances {
+    fn new() -> Instances {
+        Instances {
             glob_prim_id: 0,
             primitive_address: 0,
             task_index: 0,
@@ -288,11 +289,50 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
     }
 }
 
-pub struct Program { //TODO <P> as pso type
-    pso: gfx::PipelineState<R, primitive::Meta>,
-    data: primitive::Data<R>,
-    slice: gfx::Slice<R>,
-    upload: gfx::handle::Buffer<R, instances>,
+enum Program {
+    Primitive {
+        pso: gfx::PipelineState<R, primitive::Meta>,
+        data: primitive::Data<R>,
+        slice: gfx::Slice<R>,
+        upload: gfx::handle::Buffer<R, Instances>,
+    },
+}
+
+impl Program {
+    fn get_prim_pso(&self) -> Result<&gfx::PipelineState<R, primitive::Meta>, String> {
+        match *self {
+            Program::Primitive {ref pso, ..} => Ok(pso),
+            _=> Err(String::from("The type is not primitive.")),
+        }
+    }
+    fn get_prim_data_mut(&mut self) -> Result<&mut primitive::Data<R>, String> {
+        match *self {
+            Program::Primitive {ref mut data, ..} => Ok(data),
+            _=> Err(String::from("The type is not primitive.")),
+        }
+    }
+    fn get_prim_data(&self) -> Result<&primitive::Data<R>, String> {
+        match *self {
+            Program::Primitive {ref data, ..} => Ok(data),
+            _=> Err(String::from("The type is not primitive.")),
+        }
+    }
+    fn get_prim_upload(&self) -> Result<&gfx::handle::Buffer<R, Instances>, String> {
+        match *self {
+            Program::Primitive {ref upload, ..} => Ok(upload),
+            _=> Err(String::from("The type is not primitive.")),
+        }
+    }
+    fn get_slice(&self) -> &gfx::Slice<R> {
+        match *self {
+            Program::Primitive {ref slice, ..} => slice,
+        }
+    }
+    fn get_slice_mut(&mut self) -> &mut gfx::Slice<R> {
+        match *self {
+            Program::Primitive {ref mut slice, ..} => slice,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -377,7 +417,25 @@ impl Device {
         let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
 
-        let pso = factory.create_pipeline_simple(
+        let ps_rect_pso = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
+            primitive::new()
+        ).unwrap();
+
+        let ps_rect_transform_pso = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
+            primitive::new()
+        ).unwrap();
+
+        let ps_rect_clip_pso = factory.create_pipeline_simple(
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
+            primitive::new()
+        ).unwrap();
+
+        let ps_rect_clip_transform_pso = factory.create_pipeline_simple(
             include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
             include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
             primitive::new()
@@ -390,10 +448,10 @@ impl Device {
 
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
         let quad_vertices = [
-            position::new([x0, y0]),
-            position::new([x1, y0]),
-            position::new([x0, y1]),
-            position::new([x1, y1]),
+            Position::new([x0, y0]),
+            Position::new([x1, y0]),
+            Position::new([x0, y1]),
+            Position::new([x1, y1]),
         ];
 
         let instance_count = MAX_INSTANCE_COUNT;
@@ -403,7 +461,7 @@ impl Device {
 
             //writer[0] = min_instance::new();
             for i in 0..instance_count {
-                writer[i] = instances::new();
+                writer[i] = Instances::new();
             }
         }
 
@@ -417,12 +475,12 @@ impl Device {
         slice.instances = Some((instance_count as u32, 0));
  
         // FIXME: find the correct limits for these variables
-        let color0 = Texture::empty(&mut factory, [1024, 1]).unwrap();
-        let color1 = Texture::empty(&mut factory, [1024, 1]).unwrap();
-        let color2 = Texture::empty(&mut factory, [1024, 1]).unwrap();
-        let mask = Texture::empty(&mut factory, [1024, 1]).unwrap();
-        let cache_a8 = Texture::empty(&mut factory, [1024, 1]).unwrap();
-        let cache_rgba8 = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let color0 = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let color1 = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let color2 = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let mask = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let cache_a8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let cache_rgba8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
 
         let layers_tex = Texture::empty(&mut factory, [(1024 / VECS_PER_LAYER) as u32, 1]).unwrap();
         let render_tasks_tex = Texture::empty(&mut factory, [(1024/VECS_PER_RENDER_TASK) as u32, 1]).unwrap();
@@ -457,14 +515,40 @@ impl Device {
             out_depth: main_depth.clone(),
         };
 
-        let ps_rectangle = Program {
-            pso: pso,
+        let ps_rectangle = Program::Primitive {
+            pso: ps_rect_pso,
+            data: data.clone(),
+            slice: slice.clone(),
+            upload: upload.clone(),
+        };
+
+        let ps_rectangle_transform = Program::Primitive {
+            pso: ps_rect_transform_pso,
+            data: data.clone(),
+            slice: slice.clone(),
+            upload: upload.clone(),
+        };
+
+        let ps_rectangle_clip = Program::Primitive {
+            pso: ps_rect_clip_pso,
+            data: data.clone(),
+            slice: slice.clone(),
+            upload: upload.clone(),
+        };
+
+        let ps_rectangle_clip_transform = Program::Primitive {
+            pso: ps_rect_clip_transform_pso,
             data: data,
             slice: slice,
             upload: upload,
         };
+
         let mut programs = HashMap::new();
         programs.insert(ProgramId::PS_RECTANGLE, ps_rectangle);
+        programs.insert(ProgramId::PS_RECTANGLE_TRANSFORM, ps_rectangle_transform);
+        programs.insert(ProgramId::PS_RECTANGLE_CLIP, ps_rectangle_clip);
+        programs.insert(ProgramId::PS_RECTANGLE_CLIP_TRANSFORM, ps_rectangle_clip_transform);
+
         Device {
             device: device,
             factory: factory,
@@ -528,7 +612,8 @@ impl Device {
         Device::update_texture_f32(&mut self.encoder, &self.data32, Device::convert_data32(frame.gpu_data32.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data64, Device::convert_data64(frame.gpu_data64.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data128, Device::convert_data128(frame.gpu_data128.clone()).as_slice());
-        Device::update_texture_f32(&mut self.encoder, &self.resource_rects, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
+        //Device::update_texture_f32(&mut self.encoder, &self.resource_rects, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
+        self.dinamicaly_update_resource_rects((frame.gpu_resource_rects.len() / 1024) as u32, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
     }
 
     pub fn flush(&mut self) {
@@ -541,29 +626,36 @@ impl Device {
         println!("proj: {:?}", proj);
         println!("data: {:?}", instances);
         if let Some(program) = self.programs.get_mut(program_id) {
-            program.data.transform = proj.to_row_arrays();
-            {
-                let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-                println!("writer: {} instances: {}", writer.len(), instances.len());
-                for (i, inst) in instances.iter().enumerate() {
-                    //println!("instance[{}]: {:?}", i, inst);
-                    writer[i].update(inst);
-                    println!("instance[{}]: {:?}", i, writer[i]);
-                }
-                //writer[0].update(&instances[0]);
-                program.slice.instances = Some((instances.len() as u32, 0));
+            match * program_id {
+                ProgramId::PS_RECTANGLE | ProgramId::PS_RECTANGLE_TRANSFORM | ProgramId::PS_RECTANGLE_CLIP | ProgramId::PS_RECTANGLE_CLIP_TRANSFORM => {
+                    program.get_prim_data_mut().unwrap().transform = proj.to_row_arrays();
+                    {
+                        let mut writer = self.factory.write_mapping(program.get_prim_upload().unwrap()).unwrap();
+                        println!("writer: {} instances: {}", writer.len(), instances.len());
+                        for (i, inst) in instances.iter().enumerate() {
+                            //println!("instance[{}]: {:?}", i, inst);
+                            writer[i].update(inst);
+                            println!("instance[{}]: {:?}", i, writer[i]);
+                        }
+                    }
+                    {
+                        //writer[0].update(&instances[0]);
+                        program.get_slice_mut().instances = Some((instances.len() as u32, 0));
+                    }
+                    //println!("upload {:?}", &self.upload);
+                    println!("copy");
+                    self.encoder.copy_buffer(program.get_prim_upload().unwrap(), &program.get_prim_data().unwrap().ibuf,
+                                        0, 0, program.get_prim_upload().unwrap().len()).unwrap();
+                    /*println!("vbuf {:?}", self.data.vbuf.get_info());
+                    println!("ibuf {:?}", self.data.ibuf);
+                    println!("layers {:?}", self.layers);
+                    println!("render_tasks {:?}", self.render_tasks);
+                    println!("prim_geo {:?}", self.prim_geo);
+                    println!("data16 {:?}", self.data16);*/
+                    self.encoder.draw(program.get_slice(), program.get_prim_pso().unwrap(), program.get_prim_data().unwrap());
+                },
+                _ => println!("Shader not yet implemented {:?}",  program_id),
             }
-            //println!("upload {:?}", &self.upload);
-            println!("copy");
-            self.encoder.copy_buffer(&program.upload, &program.data.ibuf,
-                                0, 0, program.upload.len()).unwrap();
-            /*println!("vbuf {:?}", self.data.vbuf.get_info());
-            println!("ibuf {:?}", self.data.ibuf);
-            println!("layers {:?}", self.layers);
-            println!("render_tasks {:?}", self.render_tasks);
-            println!("prim_geo {:?}", self.prim_geo);
-            println!("data16 {:?}", self.data16);*/
-            self.encoder.draw(&program.slice, &program.pso, &program.data);
         } else {
             println!("Shader not yet implemented {:?}",  program_id);
         }
@@ -603,6 +695,27 @@ impl Device {
 
         let data = gfx::memory::cast_slice(memory);
         encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
+    }
+
+    pub fn dinamicaly_update_resource_rects(&mut self, len: u32, memory: &[f32]) {
+        if len > 0 {
+            self.resource_rects = Texture::empty(&mut self.factory, [1024, len]).unwrap();
+        }
+        let tex = &self.resource_rects.surface;
+        let (width, height) = self.resource_rects.get_size();
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let data = gfx::memory::cast_slice(memory);
+        self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
     fn convert_data16(data16: Vec<GpuBlock16>) -> Vec<f32> {
@@ -696,9 +809,11 @@ impl Device {
         }
         println!("convert_layer len {:?}", data.len());
         //let mut zeros = vec![0f32; (VECS_PER_LAYER * LAYERS_MAX_SIZE) * 4 - data.len()];
-        let mut zeros = vec![0f32; (((1024 / VECS_PER_LAYER) as usize) * 4 - data.len())];
-        data.append(&mut zeros);
-        assert!(data.len() == 4 * (1024 / VECS_PER_LAYER) as usize);
+        if data.len() < ((1024 / VECS_PER_LAYER) as usize) * 4 {
+            let mut zeros = vec![0f32; (((1024 / VECS_PER_LAYER) as usize) * 4 - data.len())];
+            data.append(&mut zeros);
+            assert!(data.len() == 4 * (1024 / VECS_PER_LAYER) as usize);
+        }
         data
     }
 
@@ -730,9 +845,11 @@ impl Device {
         }
         println!("convert_prim_geo len {:?}", data.len());
         //let mut zeros = vec![0f32; (VECS_PER_PRIM_GEOM * PRIMITIVE_GEOMETRY_SIZE) * 4 - data.len()];
-        let mut zeros = vec![0f32; (((2 * 1024 / VECS_PER_PRIM_GEOM) as usize) * 4 - data.len())];
-        data.append(&mut zeros);
-        assert!(data.len() == 4 * (2*1024 / VECS_PER_PRIM_GEOM) as usize);
+        if data.len() < (2 * 1024 / VECS_PER_PRIM_GEOM) * 4 as usize {
+            let mut zeros = vec![0f32; (((2 * 1024 / VECS_PER_PRIM_GEOM) as usize) * 4 - data.len())];
+            data.append(&mut zeros);
+            assert!(data.len() == 4 * (2*1024 / VECS_PER_PRIM_GEOM) as usize);
+        }
         data
     }
 
@@ -748,7 +865,7 @@ impl Device {
         let max_size = (1024 as usize) * 4;
         println!("convert_resource_rects len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; ((1024 as usize) * 4 * 4 - data.len())];
+            let mut zeros = vec![0f32; ((1024 as usize) * 4 - data.len())];
             data.append(&mut zeros);
         }
         //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
