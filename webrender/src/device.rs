@@ -127,7 +127,7 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        mask: gfx::TextureSampler<[f32; 4]> = "sMask",
+        dither: gfx::TextureSampler<[f32; 4]> = "sDtiher",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
@@ -384,7 +384,7 @@ pub struct Device {
     color0: Texture<R, Rgba32F>,
     color1: Texture<R, Rgba32F>,
     color2: Texture<R, Rgba32F>,
-    mask: Texture<R, Rgba32F>,
+    dither: Texture<R, Rgba32F>,
     cache_a8: Texture<R, Rgba32F>,
     cache_rgba8: Texture<R, Rgba32F>,
     layers: Texture<R, Rgba32F>,
@@ -472,7 +472,7 @@ impl Device {
         let color0 = Texture::empty(&mut factory, [1024, 2]).unwrap();
         let color1 = Texture::empty(&mut factory, [1024, 2]).unwrap();
         let color2 = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let mask = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let dither = Texture::empty(&mut factory, [1024, 2]).unwrap();
         let cache_a8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
         let cache_rgba8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
 
@@ -494,7 +494,7 @@ impl Device {
             color0: (color0.clone().view, color0.clone().sampler),
             color1: (color1.clone().view, color1.clone().sampler),
             color2: (color2.clone().view, color2.clone().sampler),
-            mask: (mask.clone().view, mask.clone().sampler),
+            dither: (dither.clone().view, dither.clone().sampler),
             cache_a8: (cache_a8.clone().view, cache_a8.clone().sampler),
             cache_rgba8: (cache_rgba8.clone().view, cache_rgba8.clone().sampler),
             layers: (layers_tex.clone().view, layers_tex.clone().sampler),
@@ -551,7 +551,7 @@ impl Device {
             color0: color0,
             color1: color1,
             color2: color2,
-            mask: mask,
+            dither: dither,
             cache_a8: cache_a8,
             cache_rgba8: cache_rgba8,
             layers: layers_tex,
