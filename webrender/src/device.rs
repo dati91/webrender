@@ -452,7 +452,6 @@ impl Device {
         {
             let mut writer = factory.write_mapping(&upload).unwrap();
 
-            writer[0] = min_instance::new();
             for i in 0..instance_count {
                 writer[i] = Instances::new();
             }
