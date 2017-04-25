@@ -44,18 +44,17 @@ use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, PrimitiveGeometry, TexelRect};
 
-pub const VECS_PER_LAYER: usize = 13;
-pub const VECS_PER_RENDER_TASK: usize = 3;
-pub const VECS_PER_PRIM_GEOM: usize = 2;
-pub const LAYERS_MAX_SIZE: usize = 512;
-pub const RENDER_TASKS_MAX_SIZE: usize = 512;
-pub const PRIMITIVE_GEOMETRY_SIZE: usize = 512;
+pub const VECS_PER_LAYER: u32 = 13;
+pub const VECS_PER_RENDER_TASK: u32 = 3;
+pub const VECS_PER_PRIM_GEOM: u32 = 2;
 pub const MAX_INSTANCE_COUNT: usize = 512;
-pub const VECS_PER_DATA_16: usize = 1;
-pub const VECS_PER_DATA_32: usize = 2;
-pub const VECS_PER_DATA_64: usize = 4;
-pub const VECS_PER_DATA_128: usize = 8;
-pub const DATA_16_LENGTH: usize = 4096;
+pub const VECS_PER_DATA_16: u32 = 1;
+pub const VECS_PER_DATA_32: u32 = 2;
+pub const VECS_PER_DATA_64: u32 = 4;
+pub const VECS_PER_DATA_128: u32 = 8;
+pub const VECS_PER_RESOURCE_RECTS: u32 = 1;
+pub const FLOAT_SIZE: u32 = 4;
+pub const TEXTURE_HEIGTH: u32 = 4;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ProgramId {
@@ -453,7 +452,7 @@ impl Device {
         {
             let mut writer = factory.write_mapping(&upload).unwrap();
 
-            //writer[0] = min_instance::new();
+            writer[0] = min_instance::new();
             for i in 0..instance_count {
                 writer[i] = Instances::new();
             }
@@ -469,22 +468,21 @@ impl Device {
         slice.instances = Some((instance_count as u32, 0));
  
         // FIXME: find the correct limits for these variables
-        let color0 = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let color1 = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let color2 = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let dither = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let cache_a8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
-        let cache_rgba8 = Texture::empty(&mut factory, [1024, 2]).unwrap();
+        let color0 = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let color1 = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let color2 = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let dither = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let cache_a8 = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let cache_rgba8 = Texture::empty(&mut factory, [1024, 1]).unwrap();
 
-        let layers_tex = Texture::empty(&mut factory, [(1024 / VECS_PER_LAYER) as u32, 1]).unwrap();
-        let render_tasks_tex = Texture::empty(&mut factory, [(1024/VECS_PER_RENDER_TASK) as u32, 1]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [(1024/VECS_PER_PRIM_GEOM) as u32, 2]).unwrap();
-        let data16_tex = Texture::empty(&mut factory, [(1024/VECS_PER_DATA_16 as u32), 4]).unwrap();
-        let data32_tex = Texture::empty(&mut factory, [(1024/VECS_PER_DATA_32 as u32), 4]).unwrap();
-        let data64_tex = Texture::empty(&mut factory, [(1024/VECS_PER_DATA_64 as u32), 4]).unwrap();
-        let data128_tex = Texture::empty(&mut factory, [(1024/VECS_PER_DATA_128 as u32), 8]).unwrap();
-        // FIXME: find the correct limits for this variable        
-        let resource_rects = Texture::empty(&mut factory, [1024, 1]).unwrap();
+        let layers_tex = Texture::empty(&mut factory, [1024 / VECS_PER_LAYER as u32, 64]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [1024 / VECS_PER_RENDER_TASK as u32, TEXTURE_HEIGTH]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_PRIM_GEOM as u32, TEXTURE_HEIGTH]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_16 as u32, TEXTURE_HEIGTH]).unwrap();
+        let data32_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_32 as u32, TEXTURE_HEIGTH]).unwrap();
+        let data64_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_64 as u32, TEXTURE_HEIGTH]).unwrap();
+        let data128_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_128 as u32, TEXTURE_HEIGTH]).unwrap();
+        let resource_rects = Texture::empty(&mut factory, [1024 / VECS_PER_RESOURCE_RECTS as u32, TEXTURE_HEIGTH]).unwrap();
 
         let data = primitive::Data {
             transform: [[0f32;4];4],
@@ -606,8 +604,7 @@ impl Device {
         Device::update_texture_f32(&mut self.encoder, &self.data32, Device::convert_data32(frame.gpu_data32.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data64, Device::convert_data64(frame.gpu_data64.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data128, Device::convert_data128(frame.gpu_data128.clone()).as_slice());
-        //Device::update_texture_f32(&mut self.encoder, &self.resource_rects, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
-        self.dinamicaly_update_resource_rects((frame.gpu_resource_rects.len() / 1024) as u32, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
+        Device::update_texture_f32(&mut self.encoder, &self.resource_rects, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
     }
 
     pub fn flush(&mut self) {
@@ -616,20 +613,20 @@ impl Device {
     }
 
     pub fn draw(&mut self, program_id: &ProgramId, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance]) {
-        println!("draw!");
+        /*println!("draw!");
         println!("proj: {:?}", proj);
-        println!("data: {:?}", instances);
+        println!("data: {:?}", instances);*/
         if let Some(program) = self.programs.get_mut(program_id) {
             match * program_id {
                 ProgramId::PS_RECTANGLE | ProgramId::PS_RECTANGLE_TRANSFORM | ProgramId::PS_RECTANGLE_CLIP | ProgramId::PS_RECTANGLE_CLIP_TRANSFORM => {
                     program.get_prim_data_mut().unwrap().transform = proj.to_row_arrays();
                     {
                         let mut writer = self.factory.write_mapping(program.get_prim_upload().unwrap()).unwrap();
-                        println!("writer: {} instances: {}", writer.len(), instances.len());
+                        //println!("writer: {} instances: {}", writer.len(), instances.len());
                         for (i, inst) in instances.iter().enumerate() {
                             //println!("instance[{}]: {:?}", i, inst);
                             writer[i].update(inst);
-                            println!("instance[{}]: {:?}", i, writer[i]);
+                            //println!("instance[{}]: {:?}", i, writer[i]);
                         }
                     }
                     {
@@ -637,7 +634,7 @@ impl Device {
                         program.get_slice_mut().instances = Some((instances.len() as u32, 0));
                     }
                     //println!("upload {:?}", &self.upload);
-                    println!("copy");
+                    //println!("copy");
                     self.encoder.copy_buffer(program.get_prim_upload().unwrap(), &program.get_prim_data().unwrap().ibuf,
                                         0, 0, program.get_prim_upload().unwrap().len()).unwrap();
                     /*println!("vbuf {:?}", self.data.vbuf.get_info());
@@ -691,107 +688,70 @@ impl Device {
         encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
-    pub fn dinamicaly_update_resource_rects(&mut self, len: u32, memory: &[f32]) {
-        if len > 0 {
-            self.resource_rects = Texture::empty(&mut self.factory, [1024, len]).unwrap();
-        }
-        let tex = &self.resource_rects.surface;
-        let (width, height) = self.resource_rects.get_size();
-        let img_info = gfx::texture::ImageInfoCommon {
-            xoffset: 0,
-            yoffset: 0,
-            zoffset: 0,
-            width: width as u16,
-            height: height as u16,
-            depth: 0,
-            format: (),
-            mipmap: 0,
-        };
-
-        let data = gfx::memory::cast_slice(memory);
-        self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
-    }
-
     fn convert_data16(data16: Vec<GpuBlock16>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for d in data16 {
-            /*if data.len() <= 24 {
-                println!("{:?}", d.data);
-            }*/
-            //println!("{:?}", d.data);
             data.append(&mut d.data.to_vec());
         }
-        let max_size = ((1024 / VECS_PER_DATA_16) as usize) * 4 * 4;
-        //println!("convert_data16 len {:?} max_size: {}", data.len(), max_size);
+        let max_size = ((1024 / VECS_PER_DATA_16) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
+        println!("convert_data16 len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; (((1024 / VECS_PER_DATA_16) as usize) * 4 * 4 - data.len())];
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
         }
-        //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_data32(data32: Vec<GpuBlock32>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for d in data32 {
-            /*if data.len() <= 24 {
-                println!("{:?}", d.data);
-            }*/
-            //println!("{:?}", d.data);
             data.append(&mut d.data.to_vec());
         }
-        let max_size = ((1024 / VECS_PER_DATA_32) as usize) * 4 * 4;
+        let max_size = ((1024 / VECS_PER_DATA_32) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
         println!("convert_data32 len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; (((1024 / VECS_PER_DATA_32) as usize) * 4 * 4 - data.len())];
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
         }
-        //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_data64(data64: Vec<GpuBlock64>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for d in data64 {
-            /*if data.len() <= 24 {
-                println!("{:?}", d.data);
-            }*/
-            //println!("{:?}", d.data);
             data.append(&mut d.data.to_vec());
         }
-        let max_size = ((1024 / VECS_PER_DATA_64) as usize) * 4 * 4;
+        let max_size = ((1024 / VECS_PER_DATA_64) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
         println!("convert_data64 len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; (((1024 / VECS_PER_DATA_64) as usize) * 4 * 4 - data.len())];
+            let mut zeros = vec![0f32; (max_size - data.len())];
             data.append(&mut zeros);
         }
-        //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_data128(data128: Vec<GpuBlock128>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for d in data128 {
-            /*if data.len() <= 24 {
-                println!("{:?}", d.data);
-            }*/
-            //println!("{:?}", d.data);
             data.append(&mut d.data.to_vec());
         }
-        let max_size = ((1024 / VECS_PER_DATA_128) as usize) * 8 * 4;
+        let max_size = ((1024 / VECS_PER_DATA_128) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
         println!("convert_data128 len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; (((1024 / VECS_PER_DATA_128) as usize) * 8 * 4 - data.len())];
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
         }
-        //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_layer(layers: Vec<PackedLayer>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for l in layers {
-            println!("{:?}", l);
+            //println!("{:?}", l);
             data.append(&mut l.transform.to_row_major_array().to_vec());
             data.append(&mut l.inv_transform.to_row_major_array().to_vec());
             data.append(&mut l.local_clip_rect.origin.to_array().to_vec());
@@ -801,68 +761,61 @@ impl Device {
             data.append(&mut l.screen_vertices[2].to_array().to_vec());
             data.append(&mut l.screen_vertices[3].to_array().to_vec());
         }
-        println!("convert_layer len {:?}", data.len());
-        //let mut zeros = vec![0f32; (VECS_PER_LAYER * LAYERS_MAX_SIZE) * 4 - data.len()];
-        if data.len() < ((1024 / VECS_PER_LAYER) as usize) * 4 {
-            let mut zeros = vec![0f32; (((1024 / VECS_PER_LAYER) as usize) * 4 - data.len())];
+        let max_size = ((1024 / VECS_PER_LAYER) * FLOAT_SIZE * 64) as usize;
+        println!("convert_layer len {:?} max_size: {}", data.len(), max_size);
+        if max_size > data.len() {
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
-            assert!(data.len() == 4 * (1024 / VECS_PER_LAYER) as usize);
         }
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_render_task(render_tasks: Vec<RenderTaskData>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for rt in render_tasks {
-            println!("{:?}", rt);
             data.append(&mut rt.data.to_vec());
         }
-        println!("convert_render_task len {:?}", data.len());
-        //let mut zeros = vec![0f32; (VECS_PER_RENDER_TASK * RENDER_TASKS_MAX_SIZE) * 4 - data.len()];
-        let mut zeros = vec![0f32; (((1024 / VECS_PER_RENDER_TASK) as usize) * 4 - data.len())];
-        data.append(&mut zeros);
-        assert!(data.len() == 4 * (1024 / VECS_PER_RENDER_TASK) as usize);
+        let max_size = ((1024 / VECS_PER_RENDER_TASK) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
+        println!("convert_render_task len {:?} max_size: {}", data.len(), max_size);
+        if max_size > data.len() {
+            let mut zeros = vec![0f32; max_size - data.len()];
+            data.append(&mut zeros);
+        }
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_prim_geo(prim_geo: Vec<PrimitiveGeometry>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for pg in prim_geo {
-            if data.len() <= 64 {
-                println!("pg {:?}", pg);
-            }
             data.append(&mut pg.local_rect.origin.to_array().to_vec());
             data.append(&mut pg.local_rect.size.to_array().to_vec());
             data.append(&mut pg.local_clip_rect.origin.to_array().to_vec());
             data.append(&mut pg.local_clip_rect.size.to_array().to_vec());
-            //println!("data: {:?}", data);
         }
-        println!("convert_prim_geo len {:?}", data.len());
-        //let mut zeros = vec![0f32; (VECS_PER_PRIM_GEOM * PRIMITIVE_GEOMETRY_SIZE) * 4 - data.len()];
-        if data.len() < (2 * 1024 / VECS_PER_PRIM_GEOM) * 4 as usize {
-            let mut zeros = vec![0f32; (((2 * 1024 / VECS_PER_PRIM_GEOM) as usize) * 4 - data.len())];
+        let max_size = ((1024 / VECS_PER_PRIM_GEOM) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
+        println!("convert_prim_geo len {:?} max_size: {}", data.len(), max_size);
+        if max_size > data.len() {
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
-            assert!(data.len() == 4 * (2*1024 / VECS_PER_PRIM_GEOM) as usize);
         }
+        assert!(data.len() == max_size);
         data
     }
 
     fn convert_resource_rects(resource_rects: Vec<TexelRect>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for r in resource_rects {
-            /*if data.len() <= 24 {
-                println!("{:?}", d.data);
-            }*/
-            //println!("{:?}", d.data);
             data.append(&mut r.to_vec());
         }
-        let max_size = (1024 as usize) * 4;
+        let max_size = ((1024 / VECS_PER_RESOURCE_RECTS) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
         println!("convert_resource_rects len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
-            let mut zeros = vec![0f32; ((1024 as usize) * 4 - data.len())];
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
         }
-        //assert!(data.len() == 4 * VECS_PER_DATA_16 * DATA_16_LENGTH);
+        assert!(data.len() == max_size);
         data
     }
 }
