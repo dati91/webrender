@@ -657,7 +657,7 @@ impl Renderer {
         debug_assert!(!needs_clipping ||
                       batch.key.blend_mode == BlendMode::Alpha ||
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
-
+        println!("AlphaBatchKind in submit_batch {:?}, with blend mode : {:?}", batch.key.kind, batch.key.blend_mode);
         let program_id = match batch.key.kind {
             AlphaBatchKind::Rectangle => {
                 match transform_kind {
@@ -1025,10 +1025,10 @@ impl Renderer {
                               target_size);
         }
 
-        /*self.device.disable_depth_write();
+        //self.device.disable_depth_write();
 
         for batch in &target.alpha_batcher.batch_list.alpha_batches {
-            if batch.key.blend_mode != prev_blend_mode {
+            /*if batch.key.blend_mode != prev_blend_mode {
                 match batch.key.blend_mode {
                     BlendMode::None => {
                         self.device.set_blend(false);
@@ -1047,18 +1047,19 @@ impl Renderer {
                     }
                 }
                 prev_blend_mode = batch.key.blend_mode;
-            }
+            }*/
 
             self.submit_batch(batch,
                               &projection,
                               render_task_data,
-                              color_cache_texture,
+                              //color_cache_texture,
                               render_target,
                               target_size);
+
         }
 
-        self.device.disable_depth();
-        self.device.set_blend(false);*/
+        // self.device.disable_depth();
+        // self.device.set_blend(false);
     }
 
     fn draw_alpha_target(&mut self,
