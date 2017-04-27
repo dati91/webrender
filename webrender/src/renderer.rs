@@ -764,7 +764,7 @@ impl Renderer {
             },
         };
 
-        self.device.draw(&program_id, projection, &batch.instances);
+        self.device.draw(&program_id, projection, &batch.instances, &batch.key.blend_mode);
 
         /*let (marker, shader) = match batch.key.kind {
             AlphaBatchKind::Composite => {

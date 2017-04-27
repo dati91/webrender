@@ -44,6 +44,7 @@ use gfx::format::TextureSurface;
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, PrimitiveGeometry, TexelRect};
+use renderer::BlendMode;
 
 pub const VECS_PER_LAYER: u32 = 13;
 pub const VECS_PER_RENDER_TASK: u32 = 3;
@@ -57,6 +58,8 @@ pub const VECS_PER_RESOURCE_RECTS: u32 = 1;
 pub const FLOAT_SIZE: u32 = 4;
 pub const TEXTURE_HEIGTH: u32 = 8;
 pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
+
+type PSTprimitive = gfx::PipelineState<R, primitive::Meta>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ProgramId {
@@ -142,7 +145,7 @@ gfx_defines! {
         data128: gfx::TextureSampler<[f32; 4]> = "sData128",
         resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
 
-        out_color: gfx::RawRenderTarget = ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, None),
+        out_color: gfx::RawRenderTarget = ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 }
@@ -285,18 +288,33 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
 
 struct Program {
     pub data: primitive::Data<R>,
-    pub pso: gfx::PipelineState<R, primitive::Meta>,
+    pub pso: PSTprimitive,
+    pub pso_alpha: PSTprimitive,
+    pub pso_prem_alpha: PSTprimitive,
+    pub pso_subpixel: PSTprimitive,
     pub slice: gfx::Slice<R>,
     pub upload: gfx::handle::Buffer<R, Instances>,
 }
 
 impl Program {
-    fn new(data: primitive::Data<R>, pso: gfx::PipelineState<R, primitive::Meta>, slice: gfx::Slice<R>, upload: gfx::handle::Buffer<R, Instances>) -> Program {
+    fn new(data: primitive::Data<R>, pso: (PSTprimitive, PSTprimitive, PSTprimitive, PSTprimitive), slice: gfx::Slice<R>, upload: gfx::handle::Buffer<R, Instances>) -> Program {
         Program {
             data: data,
-            pso: pso,
+            pso: pso.0,
+            pso_alpha: pso.1,
+            pso_prem_alpha: pso.2,
+            pso_subpixel: pso.3,
             slice: slice,
             upload: upload,
+        }
+    }
+
+    fn get_pso(&self, blend: &BlendMode) -> &PSTprimitive {
+        match *blend {
+            BlendMode::None => &self.pso,
+            BlendMode::Alpha => &self.pso_alpha,
+            BlendMode::PremultipliedAlpha => &self.pso_prem_alpha,
+            BlendMode::Subpixel(..) => &self.pso_subpixel,
         }
     }
 }
@@ -383,84 +401,6 @@ impl Device {
         let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
 
-        let ps_rect_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
-            primitive::new()
-        ).unwrap();
-
-        let ps_rect_transform_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
-            primitive::new()
-        ).unwrap();
-
-        let ps_rect_clip_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
-            primitive::new()
-        ).unwrap();
-
-        let ps_rect_clip_transform_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
-            primitive::new()
-        ).unwrap();
-
-        let ps_border_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let ps_border_transform_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_transform.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_transform.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let ps_border_corner_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let ps_border_corner_transform_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let ps_border_edge_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let ps_border_edge_transform_pso = factory.create_pipeline_simple(
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.vert")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.frag")),
-            primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
         let x0 = 0.0;
         let y0 = 0.0;
         let x1 = 1.0;
@@ -519,24 +459,85 @@ impl Device {
             main_color: main_color,
             main_depth: main_depth,
         };
-        device.add_primitive_program(ps_rect_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE);
-        device.add_primitive_program(ps_rect_transform_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_TRANSFORM);
-        device.add_primitive_program(ps_rect_clip_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_CLIP);
-        device.add_primitive_program(ps_rect_clip_transform_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_CLIP_TRANSFORM);
-        device.add_primitive_program(ps_border_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER);
-        device.add_primitive_program(ps_border_transform_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_TRANSFORM);
-        device.add_primitive_program(ps_border_corner_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_CORNER);
-        device.add_primitive_program(ps_border_corner_transform_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_CORNER_TRANSFORM);
-        device.add_primitive_program(ps_border_edge_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_EDGE);
-        device.add_primitive_program(ps_border_edge_transform_pso, vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_EDGE_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_CLIP);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE_CLIP_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_CORNER);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_CORNER_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_EDGE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_EDGE_TRANSFORM);
         device
     }
 
-    fn add_primitive_program(&mut self,
-                              pso: gfx::PipelineState<R, primitive::Meta>,
-                              vertex_buffer: gfx::handle::Buffer<R, Position>,
-                              slice: gfx::Slice<R>,
-                              program_id: ProgramId) {
+    fn create_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PSTprimitive, PSTprimitive, PSTprimitive, PSTprimitive) {
+        let pso = self.factory.create_pipeline_simple(
+            vert_src,
+            frag_src,
+            primitive::new()
+        ).unwrap();
+
+        let pso_alpha = self.factory.create_pipeline_simple(
+            vert_src,
+            frag_src,
+            primitive::Init {
+            // FIXME: Replace the blend value with the one which webrender uses for Alpha blendmode.
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::ALPHA)),
+                .. primitive::new()
+            }
+        ).unwrap();
+
+        let pso_prem_alpha = self.factory.create_pipeline_simple(
+            vert_src,
+            frag_src,
+            primitive::Init {
+            // FIXME: Replace the blend value with the one which webrender uses for PremultipliedAlpha blendmode.
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::MULTIPLY)),
+                .. primitive::new()
+            }
+        ).unwrap();
+
+        let pso_subpixel = self.factory.create_pipeline_simple(
+            vert_src,
+            frag_src,
+            primitive::Init {
+            // FIXME: Replace the blend value with the one which webrender uses for Subpixel blendmode.
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
+                .. primitive::new()
+            }
+        ).unwrap();
+
+        (pso, pso_alpha, pso_prem_alpha, pso_subpixel)
+    }
+
+    fn add_program(&mut self,
+                   vert_src: &[u8],
+                   frag_src: &[u8],
+                   vertex_buffer: gfx::handle::Buffer<R, Position>,
+                   slice: gfx::Slice<R>,
+                   program_id: ProgramId) {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
         {
             let mut writer = self.factory.write_mapping(&upload).unwrap();
@@ -547,9 +548,9 @@ impl Device {
         }
 
         let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                              gfx::buffer::Role::Vertex,
-                                              gfx::memory::Usage::Data,
-                                              gfx::TRANSFER_DST).unwrap();
+                                                   gfx::buffer::Role::Vertex,
+                                                   gfx::memory::Usage::Data,
+                                                   gfx::TRANSFER_DST).unwrap();
 
         let data = primitive::Data {
             transform: [[0f32;4];4],
@@ -573,7 +574,8 @@ impl Device {
             out_color: self.main_color.raw().clone(),
             out_depth: self.main_depth.clone(),
         };
-        let program = Program::new(data, pso, slice, upload);
+        let psos = self.create_psos(vert_src, frag_src);
+        let program = Program::new(data, psos, slice, upload);
         self.programs.insert(program_id, program);
     }
 
@@ -623,7 +625,7 @@ impl Device {
         self.encoder.flush(&mut self.device);
     }
 
-    pub fn draw(&mut self, program_id: &ProgramId, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance]) {
+    pub fn draw(&mut self, program_id: &ProgramId, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
         /*println!("draw!");
         println!("proj: {:?}", proj);
         println!("data: {:?}", instances);*/
@@ -658,7 +660,7 @@ impl Device {
                     println!("data16 {:?}", self.data16);*/
                     //self.encoder.draw(program.get_slice(), &(*program.get_pso() as gfx::PipelineState<R, _>), program.get_prim_data().unwrap());
                     //self.encoder.draw(program.get_slice(), program.get_pso().as_any().downcast_ref::<gfx::PipelineState<R, _>>().unwrap(), program.get_prim_data().unwrap());
-                    self.encoder.draw(&program.slice, &program.pso, &program.data);
+                    self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
                 },
                 _ => println!("Shader not yet implemented {:?}",  program_id),
             }
