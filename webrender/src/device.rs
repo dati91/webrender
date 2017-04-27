@@ -26,7 +26,9 @@ use std;
 use std::env;
 use glutin;
 use gfx;
+use gfx::CommandBuffer;
 use gfx::pso::PipelineData;
+use gfx::state::{Blend, BlendChannel, BlendValue, Equation, Factor, RefValues};
 use gfx_core;
 use gfx_core::memory::Typed;
 use gfx::Factory;
@@ -59,7 +61,46 @@ pub const FLOAT_SIZE: u32 = 4;
 pub const TEXTURE_HEIGTH: u32 = 8;
 pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
 
-type PSTprimitive = gfx::PipelineState<R, primitive::Meta>;
+pub const ALPHA: Blend = Blend {
+    color: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::ZeroPlus(BlendValue::SourceAlpha),
+        destination: Factor::OneMinus(BlendValue::SourceAlpha),
+    },
+    alpha: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::One,
+        destination: Factor::OneMinus(BlendValue::SourceAlpha),
+    },
+};
+
+pub const PREM_ALPHA: Blend = Blend {
+    color: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::One,
+        destination: Factor::OneMinus(BlendValue::SourceAlpha),
+    },
+    alpha: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::One,
+        destination: Factor::OneMinus(BlendValue::SourceAlpha),
+    },
+};
+
+pub const SUBPIXEL: Blend = Blend {
+    color: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::ZeroPlus(BlendValue::ConstColor),
+        destination: Factor::OneMinus(BlendValue::SourceColor),
+    },
+    alpha: BlendChannel {
+        equation: Equation::Add,
+        source: Factor::ZeroPlus(BlendValue::ConstColor),
+        destination: Factor::OneMinus(BlendValue::SourceColor),
+    },
+};
+
+type PSPrimitive = gfx::PipelineState<R, primitive::Meta>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ProgramId {
@@ -288,16 +329,16 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
 
 struct Program {
     pub data: primitive::Data<R>,
-    pub pso: PSTprimitive,
-    pub pso_alpha: PSTprimitive,
-    pub pso_prem_alpha: PSTprimitive,
-    pub pso_subpixel: PSTprimitive,
+    pub pso: PSPrimitive,
+    pub pso_alpha: PSPrimitive,
+    pub pso_prem_alpha: PSPrimitive,
+    pub pso_subpixel: PSPrimitive,
     pub slice: gfx::Slice<R>,
     pub upload: gfx::handle::Buffer<R, Instances>,
 }
 
 impl Program {
-    fn new(data: primitive::Data<R>, pso: (PSTprimitive, PSTprimitive, PSTprimitive, PSTprimitive), slice: gfx::Slice<R>, upload: gfx::handle::Buffer<R, Instances>) -> Program {
+    fn new(data: primitive::Data<R>, pso: (PSPrimitive, PSPrimitive, PSPrimitive, PSPrimitive), slice: gfx::Slice<R>, upload: gfx::handle::Buffer<R, Instances>) -> Program {
         Program {
             data: data,
             pso: pso.0,
@@ -309,7 +350,7 @@ impl Program {
         }
     }
 
-    fn get_pso(&self, blend: &BlendMode) -> &PSTprimitive {
+    fn get_pso(&self, blend: &BlendMode) -> &PSPrimitive {
         match *blend {
             BlendMode::None => &self.pso,
             BlendMode::Alpha => &self.pso_alpha,
@@ -492,7 +533,7 @@ impl Device {
         device
     }
 
-    fn create_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PSTprimitive, PSTprimitive, PSTprimitive, PSTprimitive) {
+    fn create_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PSPrimitive, PSPrimitive, PSPrimitive, PSPrimitive) {
         let pso = self.factory.create_pipeline_simple(
             vert_src,
             frag_src,
@@ -503,8 +544,7 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-            // FIXME: Replace the blend value with the one which webrender uses for Alpha blendmode.
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::ALPHA)),
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(ALPHA)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -513,8 +553,7 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-            // FIXME: Replace the blend value with the one which webrender uses for PremultipliedAlpha blendmode.
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::MULTIPLY)),
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(PREM_ALPHA)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -523,8 +562,7 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-            // FIXME: Replace the blend value with the one which webrender uses for Subpixel blendmode.
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(gfx::preset::blend::ADD)),
+                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(SUBPIXEL)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -630,6 +668,7 @@ impl Device {
         println!("proj: {:?}", proj);
         println!("data: {:?}", instances);*/
         if let Some(program) = self.programs.get_mut(program_id) {
+            println!("{:?}", program_id);
             match * program_id {
                 ProgramId::PS_RECTANGLE | ProgramId::PS_RECTANGLE_TRANSFORM | ProgramId::PS_RECTANGLE_CLIP |
                 ProgramId::PS_RECTANGLE_CLIP_TRANSFORM | ProgramId::PS_BORDER | ProgramId::PS_BORDER_EDGE | ProgramId::PS_BORDER_CORNER |
@@ -650,6 +689,11 @@ impl Device {
                     }
                     //println!("upload {:?}", &self.upload);
                     //println!("copy");
+                    if let &BlendMode::Subpixel(ref color) = blendmode {
+                        let _ref_values = RefValues{blend: [color.r, color.g, color.b, color.a], ..RefValues::default()};
+                        //TODO: Update the blending color values with `ref_values`.
+                    }
+
                     self.encoder.copy_buffer(&program.upload, &program.data.ibuf,
                                              0, 0, program.upload.len()).unwrap();
                     /*println!("vbuf {:?}", self.data.vbuf.get_info());
@@ -658,8 +702,6 @@ impl Device {
                     println!("render_tasks {:?}", self.render_tasks);
                     println!("prim_geo {:?}", self.prim_geo);
                     println!("data16 {:?}", self.data16);*/
-                    //self.encoder.draw(program.get_slice(), &(*program.get_pso() as gfx::PipelineState<R, _>), program.get_prim_data().unwrap());
-                    //self.encoder.draw(program.get_slice(), program.get_pso().as_any().downcast_ref::<gfx::PipelineState<R, _>>().unwrap(), program.get_prim_data().unwrap());
                     self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
                 },
                 _ => println!("Shader not yet implemented {:?}",  program_id),
