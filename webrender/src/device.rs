@@ -473,7 +473,7 @@ impl Device {
         let data32_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_32 as u32, TEXTURE_HEIGTH]).unwrap();
         let data64_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_64 as u32, TEXTURE_HEIGTH]).unwrap();
         let data128_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_128 as u32, TEXTURE_HEIGTH * 4]).unwrap();
-        let resource_rects = Texture::empty(&mut factory, [1024 / VECS_PER_RESOURCE_RECTS as u32, TEXTURE_HEIGTH]).unwrap();
+        let resource_rects = Texture::empty(&mut factory, [1024 / VECS_PER_RESOURCE_RECTS as u32, TEXTURE_HEIGTH * 2]).unwrap();
 
         let mut programs = HashMap::new();
 
@@ -530,6 +530,96 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_BORDER_EDGE_TRANSFORM);
+        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_BLUR);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_BOX_SHADOW);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_CLIP_IMAGE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_CLIP_RECTANGLE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_TEXT_RUN);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BLEND);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BOX_SHADOW);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_BOX_SHADOW_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CACHE_IMAGE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CACHE_IMAGE_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_HARDWARE_COMPOSITE);*/
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_IMAGE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_IMAGE_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_rect.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_rect.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_IMAGE_RECT);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_rect_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_rect_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_IMAGE_RECT_TRANSFORM);
+       /* device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE_TRANSFORM);*/
         device
     }
 
@@ -670,9 +760,38 @@ impl Device {
         if let Some(program) = self.programs.get_mut(program_id) {
             println!("{:?}", program_id);
             match * program_id {
-                ProgramId::PS_RECTANGLE | ProgramId::PS_RECTANGLE_TRANSFORM | ProgramId::PS_RECTANGLE_CLIP |
-                ProgramId::PS_RECTANGLE_CLIP_TRANSFORM | ProgramId::PS_BORDER | ProgramId::PS_BORDER_EDGE | ProgramId::PS_BORDER_CORNER |
-                ProgramId::PS_BORDER_TRANSFORM | ProgramId::PS_BORDER_EDGE_TRANSFORM | ProgramId::PS_BORDER_CORNER_TRANSFORM => {
+                ProgramId::CS_BLUR |
+                ProgramId::CS_BOX_SHADOW |
+                ProgramId::CS_CLIP_IMAGE |
+                ProgramId::CS_CLIP_RECTANGLE |
+                ProgramId::CS_TEXT_RUN |
+                ProgramId::PS_ANGLE_GRADIENT |
+                ProgramId::PS_ANGLE_GRADIENT_TRANSFORM |
+                ProgramId::PS_BLEND |
+                ProgramId::PS_BOX_SHADOW |
+                ProgramId::PS_BOX_SHADOW_TRANSFORM |
+                ProgramId::PS_CACHE_IMAGE |
+                ProgramId::PS_CACHE_IMAGE_TRANSFORM |
+                ProgramId::PS_CLEAR |
+                ProgramId::PS_CLEAR_TRANSFORM |
+                ProgramId::PS_COMPOSITE |
+                ProgramId::PS_GRADIENT |
+                ProgramId::PS_GRADIENT_TRANSFORM |
+                ProgramId::PS_HARDWARE_COMPOSITE |
+                // ProgramId::PS_IMAGE |
+                // ProgramId::PS_IMAGE_TRANSFORM |
+                // ProgramId::PS_IMAGE_RECT |
+                // ProgramId::PS_IMAGE_RECT_TRANSFORM |
+                ProgramId::PS_RADIAL_GRADIENT |
+                ProgramId::PS_RADIAL_GRADIENT_TRANSFORM |
+                ProgramId::PS_TEXT_RUN |
+                ProgramId::PS_TEXT_RUN_TRANSFORM |
+                ProgramId::PS_TEXT_RUN_SUBPIXEL |
+                ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM |
+                ProgramId::PS_YUV_IMAGE |
+                ProgramId::PS_YUV_IMAGE_TRANSFORM
+                => println!("Shader not yet implemented {:?}",  program_id),
+                _ => {
                     program.data.transform = proj.to_row_arrays();
                     {
                         let mut writer = self.factory.write_mapping(&program.upload).unwrap();
@@ -704,7 +823,6 @@ impl Device {
                     println!("data16 {:?}", self.data16);*/
                     self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
                 },
-                _ => println!("Shader not yet implemented {:?}",  program_id),
             }
         } else {
             println!("Shader not yet implemented {:?}",  program_id);
@@ -872,7 +990,7 @@ impl Device {
         for r in resource_rects {
             data.append(&mut r.to_vec());
         }
-        let max_size = ((1024 / VECS_PER_RESOURCE_RECTS) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
+        let max_size = ((1024 / VECS_PER_RESOURCE_RECTS) * FLOAT_SIZE * TEXTURE_HEIGTH * 2) as usize;
         println!("convert_resource_rects len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
