@@ -31,6 +31,7 @@ bitflags = "0.7"
 gamma-lut = "0.1"
 thread_profiler = "0.1.1"
 
+rand = "0.3"
 gfx = "0.14"
 gfx_window_glutin = "0.14"
 glutin = "0.7"
