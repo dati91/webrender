@@ -191,6 +191,7 @@ gfx_defines! {
 
         out_color: gfx::RawRenderTarget = ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+        blend_value: gfx::BlendRef = (),
     }
 }
 
@@ -559,7 +560,7 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT_TRANSFORM);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
+        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_BLEND);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.vert")),
@@ -582,7 +583,7 @@ impl Device {
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR_TRANSFORM);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);*/
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT);
@@ -613,10 +614,10 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL);
-        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
+        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
@@ -704,6 +705,7 @@ impl Device {
             gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
             out_color: self.main_color.raw().clone(),
             out_depth: self.main_depth.clone(),
+            blend_value: [0.0, 0.0, 0.0, 0.0]
         };
         let psos = self.create_psos(vert_src, frag_src);
         let program = Program::new(data, psos, slice, upload);
@@ -779,8 +781,7 @@ impl Device {
             //println!("upload {:?}", &self.upload);
             //println!("copy");
             if let &BlendMode::Subpixel(ref color) = blendmode {
-                let _ref_values = RefValues{blend: [color.r, color.g, color.b, color.a], ..RefValues::default()};
-                //TODO: Update the blending color values with `ref_values`.
+                program.data.blend_value = [color.r, color.g, color.b, color.a];
             }
 
             self.encoder.copy_buffer(&program.upload, &program.data.ibuf,
