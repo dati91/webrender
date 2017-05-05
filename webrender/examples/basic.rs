@@ -306,7 +306,7 @@ fn main() {
         ColorF::new(0.0, 0.75, 1.0, 1.0)
     );
 
-    if false { // draw text?
+    if true { // draw text?
         let font_key = api.generate_font_key();
         let font_bytes = load_file("res/FreeSans.ttf");
         api.add_raw_font(font_key, font_bytes, 0);
