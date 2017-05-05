@@ -61,6 +61,8 @@ use glutin;
 
 pub const GPU_DATA_TEXTURE_POOL: usize = 5;
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
+pub const DUMMY_RGBA8_ID: u32 = 2;
+pub const DUMMY_A8_ID: u32 = 3;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ImageBufferKind {
@@ -262,6 +264,14 @@ pub struct Renderer {
     /// use a hashmap, and allows a flat vector for performance.
     cache_texture_id_map: Vec<TextureId>,
 
+    /// A special 1x1 dummy cache texture used for shaders that expect to work
+    /// with the cache but are actually running in the first pass
+    /// when no target is yet provided as a cache texture input.
+    dummy_cache_texture_id: TextureId,
+    dummy_cache_texture_a8_id: TextureId,
+
+    dither_matrix_texture_id: Option<TextureId>,
+
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
     external_image_handler: Option<Box<ExternalImageHandler>>,
@@ -319,11 +329,14 @@ impl Renderer {
         let notifier = Arc::new(Mutex::new(None));
 
         let mut device = Device::new(window);
-        
+
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
 
         let mut texture_cache = TextureCache::new(max_texture_size);
+        let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Default);
+        let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Default);
+        let dither_matrix_texture_id = None;
 
         let x0 = 0.0;
         let y0 = 0.0;
@@ -412,6 +425,9 @@ impl Renderer {
             pipeline_epoch_map: HashMap::with_hasher(Default::default()),
             main_thread_dispatcher: main_thread_dispatcher,
             cache_texture_id_map: Vec::new(),
+            dummy_cache_texture_id: dummy_cache_texture_id,
+            dummy_cache_texture_a8_id: dummy_cache_texture_a8_id,
+            dither_matrix_texture_id: dither_matrix_texture_id,
             external_image_handler: None,
             external_images: HashMap::with_hasher(Default::default()),
             vr_compositor_handler: vr_compositor,
@@ -497,8 +513,7 @@ impl Renderer {
     // for the image data.
     fn resolve_source_texture(&mut self, texture_id: &SourceTexture) -> TextureId {
         match *texture_id {
-            _ => TextureId::invalid(),
-            /*SourceTexture::Invalid => TextureId::invalid(),
+            SourceTexture::Invalid => TextureId::invalid(),
             SourceTexture::WebGL(id) => TextureId::new(id, TextureTarget::Default),
             SourceTexture::External(external_image) => {
                 *self.external_images
@@ -507,7 +522,7 @@ impl Renderer {
             }
             SourceTexture::TextureCache(index) => {
                 self.cache_texture_id_map[index.0]
-            }*/
+            }
         }
     }
 
@@ -538,7 +553,7 @@ impl Renderer {
                 // self.device.set_blend(false);
 
                 // self.update_shaders();
-                // self.update_texture_cache();
+                self.update_texture_cache();
                 self.draw_tile_frame(frame, &framebuffer_size);
                 // self.device.end_frame();
                 self.device.flush();
@@ -572,7 +587,7 @@ impl Renderer {
 */
 
     fn update_texture_cache(&mut self) {
-        /*let _gm = GpuMarker::new(self.device.rc_gl(), "texture cache update");
+        //let _gm = GpuMarker::new(self.device.rc_gl(), "texture cache update");
         let mut pending_texture_updates = mem::replace(&mut self.pending_texture_updates, vec![]);
         for update_list in pending_texture_updates.drain(..) {
             for update in update_list.updates {
@@ -582,7 +597,7 @@ impl Renderer {
                         if self.cache_texture_id_map.len() == cache_texture_index {
                             // Create a new native texture, as requested by the texture cache.
                             let texture_id = self.device
-                                                 .create_texture_ids(1, TextureTarget::Default)[0];
+                                                 .create_texture_ids(1, TextureTarget::Default, format)[0];
                             self.cache_texture_id_map.push(texture_id);
                         }
                         let texture_id = self.cache_texture_id_map[cache_texture_index];
@@ -684,7 +699,7 @@ impl Renderer {
                     }
                 }
             }
-        }*/
+        }
     }
 
     /*fn draw_instanced_batch<T>(&mut self,
@@ -836,87 +851,15 @@ impl Renderer {
             },
         };
 
-        self.device.draw(&program_id, projection, &batch.instances, &batch.key.blend_mode);
+        for i in 0..batch.key.textures.colors.len() {
+            let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
+            self.device.bind_texture(TextureSampler::color(i), texture_id);
+        }
 
-        /*let (marker, shader) = match batch.key.kind {
-            AlphaBatchKind::Composite => {
-                let shader = self.ps_composite.get(&mut self.device);
-                (GPU_TAG_PRIM_COMPOSITE, shader)
-            }
-            AlphaBatchKind::HardwareComposite => {
-                let shader = self.ps_hw_composite.get(&mut self.device);
-                (GPU_TAG_PRIM_HW_COMPOSITE, shader)
-            }
-            AlphaBatchKind::SplitComposite => {
-                let shader = self.ps_split_composite.get(&mut self.device);
-                (GPU_TAG_PRIM_SPLIT_COMPOSITE, shader)
-            }
-            AlphaBatchKind::Blend => {
-                let shader = self.ps_blend.get(&mut self.device);
-                (GPU_TAG_PRIM_BLEND, shader)
-            }
-            AlphaBatchKind::Rectangle => {
-                let shader = if needs_clipping {
-                    self.ps_rectangle_clip.get(&mut self.device, transform_kind)
-                } else {
-                    self.ps_rectangle.get(&mut self.device, transform_kind)
-                };
-                (GPU_TAG_PRIM_RECT, shader)
-            }
-            AlphaBatchKind::TextRun => {
-                let shader = match batch.key.blend_mode {
-                    BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(&mut self.device, transform_kind),
-                    BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::None => self.ps_text_run.get(&mut self.device, transform_kind),
-                };
-                (GPU_TAG_PRIM_TEXT_RUN, shader)
-            }
-            AlphaBatchKind::Image(image_buffer_kind) => {
-                let shader = self.ps_image[image_buffer_kind as usize].as_mut().unwrap().get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_IMAGE, shader)
-            }
-            AlphaBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
-                let shader_index = Renderer::get_yuv_shader_index(image_buffer_kind,
-                                                                  format,
-                                                                  color_space);
-                let shader = self.ps_yuv_image[shader_index].as_mut().unwrap().get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_YUV_IMAGE, shader)
-            }
-            AlphaBatchKind::Border => {
-                let shader = self.ps_border.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_BORDER, shader)
-            }
-            AlphaBatchKind::BorderCorner => {
-                let shader = self.ps_border_corner.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_BORDER_CORNER, shader)
-            }
-            AlphaBatchKind::BorderEdge => {
-                let shader = self.ps_border_edge.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_BORDER_EDGE, shader)
-            }
-            AlphaBatchKind::AlignedGradient => {
-                let shader = self.ps_gradient.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_GRADIENT, shader)
-            }
-            AlphaBatchKind::AngleGradient => {
-                let shader = self.ps_angle_gradient.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_ANGLE_GRADIENT, shader)
-            }
-            AlphaBatchKind::RadialGradient => {
-                let shader = self.ps_radial_gradient.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_RADIAL_GRADIENT, shader)
-            }
-            AlphaBatchKind::BoxShadow => {
-                let shader = self.ps_box_shadow.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_BOX_SHADOW, shader)
-            }
-            AlphaBatchKind::CacheImage => {
-                let shader = self.ps_cache_image.get(&mut self.device, transform_kind);
-                (GPU_TAG_PRIM_CACHE_IMAGE, shader)
-            }
-        };
+        self.device.draw(&program_id, projection, &batch.instances, &batch.key.textures, &batch.key.blend_mode);
 
         // Handle special case readback for composites.
-        if batch.key.kind == AlphaBatchKind::Composite {
+        /*if batch.key.kind == AlphaBatchKind::Composite {
             // composites can't be grouped together because
             // they may overlap and affect each other.
             debug_assert!(batch.instances.len() == 1);
@@ -974,9 +917,6 @@ impl Renderer {
             self.device.bind_draw_target(render_target, Some(target_dimensions));
         }
 
-        let shader = shader.unwrap();
-        let _gm = self.gpu_profile.add_marker(marker);
-        let vao = self.prim_vao_id;
         self.draw_instanced_batch(&batch.instances,
                                   vao,
                                   shader,
@@ -988,7 +928,7 @@ impl Renderer {
                          render_target: Option<(TextureId, i32)>,
                          target: &ColorRenderTarget,
                          target_size: DeviceUintSize,
-                         // color_cache_texture: TextureId,
+                         color_cache_texture: TextureId,
                          clear_color: Option<[f32; 4]>,
                          render_task_data: &[RenderTaskData],
                          projection: &Matrix4D<f32>) {
@@ -1131,7 +1071,7 @@ impl Renderer {
     }
 
     fn draw_alpha_target(&mut self,
-                         // render_target: (TextureId, i32),
+                         render_target: (TextureId, i32),
                          target: &AlphaRenderTarget,
                          target_size: DeviceUintSize,
                          projection: &Matrix4D<f32>) {
@@ -1268,20 +1208,21 @@ impl Renderer {
         // self.device.disable_stencil();
         // self.device.set_blend(false);
 
+        //println!("pending_texture_updates: {:?}", self.pending_texture_updates);
+
         if frame.passes.is_empty() {
             //self.device.clear_target(Some(self.clear_color.to_array()), Some(1.0));
         } else {
             // Assign render targets to the passes.
             for pass in &mut frame.passes {
-                /*debug_assert!(pass.color_texture_id.is_none());
+                debug_assert!(pass.color_texture_id.is_none());
                 debug_assert!(pass.alpha_texture_id.is_none());
 
                 if pass.needs_render_target_kind(RenderTargetKind::Color) {
                     pass.color_texture_id = Some(self.color_render_targets
                                                      .pop()
                                                      .unwrap_or_else(|| {
-                                                         self.device
-                                                             .create_texture_ids(1, TextureTarget::Array)[0]
+                                                         TextureId::invalid()
                                                       }));
                 }
 
@@ -1289,14 +1230,13 @@ impl Renderer {
                     pass.alpha_texture_id = Some(self.alpha_render_targets
                                                      .pop()
                                                      .unwrap_or_else(|| {
-                                                         self.device
-                                                             .create_texture_ids(1, TextureTarget::Array)[0]
+                                                         TextureId::invalid_a8()
                                                       }));
-                }*/
+                }
             }
 
             // Init textures and render targets to match this scene.
-            /*for pass in &frame.passes {
+            for pass in &frame.passes {
                 if let Some(texture_id) = pass.color_texture_id {
                     let target_count = pass.required_target_count(RenderTargetKind::Color);
                     self.device.init_texture(texture_id,
@@ -1317,7 +1257,7 @@ impl Renderer {
                                              RenderTargetMode::LayerRenderTarget(target_count as i32),
                                              None);
                 }
-            }*/
+            }
 
             // TODO(gw): This is a hack / workaround for #728.
             // We should find a better way to implement these updates rather
@@ -1328,8 +1268,8 @@ impl Renderer {
 
             self.device.update(frame);
 
-            // let mut src_color_id = self.dummy_cache_texture_id;
-            // let mut src_alpha_id = self.dummy_cache_texture_id;
+            let mut src_color_id = self.dummy_cache_texture_id;
+            let mut src_alpha_id = self.dummy_cache_texture_a8_id;
 
             for pass in &mut frame.passes {
                 let size;
@@ -1362,11 +1302,11 @@ impl Renderer {
                                                  ORTHO_FAR_PLANE);
                 }
 
-                // self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
-                // self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
+                 self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
+                 self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
 
                 for (target_index, target) in pass.alpha_targets.targets.iter().enumerate() {
-                    self.draw_alpha_target(//(pass.alpha_texture_id.unwrap(), target_index as i32),
+                    self.draw_alpha_target((pass.alpha_texture_id.unwrap(), target_index as i32),
                                            target,
                                            *size,
                                            &projection);
@@ -1379,27 +1319,27 @@ impl Renderer {
                     self.draw_color_target(render_target,
                                            target,
                                            *size,
-                                           //src_color_id,
+                                           src_color_id,
                                            clear_color,
                                            &frame.render_task_data,
                                            &projection);
 
                 }
 
-                // src_color_id = pass.color_texture_id.unwrap_or(self.dummy_cache_texture_id);
-                // src_alpha_id = pass.alpha_texture_id.unwrap_or(self.dummy_cache_texture_id);
+                 src_color_id = pass.color_texture_id.unwrap_or(self.dummy_cache_texture_id);
+                 src_alpha_id = pass.alpha_texture_id.unwrap_or(self.dummy_cache_texture_a8_id);
 
                 // Return the texture IDs to the pool for next frame.
-                // if let Some(texture_id) = pass.color_texture_id.take() {
-                //     self.color_render_targets.push(texture_id);
-                // }
-                // if let Some(texture_id) = pass.alpha_texture_id.take() {
-                //     self.alpha_render_targets.push(texture_id);
-                // }
+                if let Some(texture_id) = pass.color_texture_id.take() {
+                    self.color_render_targets.push(texture_id);
+                }
+                if let Some(texture_id) = pass.alpha_texture_id.take() {
+                    self.alpha_render_targets.push(texture_id);
+                }
             }
 
-            // self.color_render_targets.reverse();
-            // self.alpha_render_targets.reverse();
+            self.color_render_targets.reverse();
+            self.alpha_render_targets.reverse();
             // self.draw_render_target_debug(framebuffer_size);
         }
 

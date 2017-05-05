@@ -45,6 +45,7 @@ extern crate bitflags;
 #[macro_use]
 extern crate thread_profiler;
 
+extern crate rand;
 extern crate glutin;
 #[macro_use]
 extern crate gfx;
