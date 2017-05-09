@@ -204,23 +204,24 @@ fn main() {
                                   None,
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
+
     builder.push_image(
-        LayoutRect::new(LayoutPoint::new(30.0, 30.0), LayoutSize::new(500.0, 500.0)),
+        LayoutRect::new(LayoutPoint::new(30.0, 30.0), LayoutSize::new(512.0, 512.0)),
         ClipRegion::simple(&bounds),
-        LayoutSize::new(500.0, 500.0),
+        LayoutSize::new(512.0, 512.0),
         LayoutSize::new(0.0, 0.0),
         ImageRendering::Auto,
         blob_img1,
     );
 
-    builder.push_image(
+    /*builder.push_image(
         LayoutRect::new(LayoutPoint::new(600.0, 60.0), LayoutSize::new(200.0, 200.0)),
         ClipRegion::simple(&bounds),
         LayoutSize::new(200.0, 200.0),
         LayoutSize::new(0.0, 0.0),
         ImageRendering::Auto,
         blob_img2,
-    );
+    );*/
 
     builder.pop_stacking_context();
 
