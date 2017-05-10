@@ -272,12 +272,12 @@ fn main() {
         builder.new_clip_region(&bounds, vec![complex], Some(mask))
     };
 
-    /*builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       sub_clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
     builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       sub_clip,
-                      ColorF::new(0.0, 1.0, 0.0, 1.0));*/
+                      ColorF::new(0.0, 1.0, 0.0, 1.0));
     let border_side = webrender_traits::BorderSide {
         color: ColorF::new(0.0, 0.0, 1.0, 1.0),
         style: webrender_traits::BorderStyle::Groove,
@@ -306,7 +306,7 @@ fn main() {
         ColorF::new(0.0, 0.75, 1.0, 1.0)
     );
 
-    if true { // draw text?
+    if false { // draw text?
         let font_key = api.generate_font_key();
         let font_bytes = load_file("res/FreeSans.ttf");
         api.add_raw_font(font_key, font_bytes, 0);

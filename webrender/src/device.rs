@@ -559,7 +559,7 @@ impl Device {
                            vertex_buffer.clone(), slice.clone(), ProgramId::CS_CLIP_RECTANGLE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_TEXT_RUN);
+                           vertex_buffer.clone(), slice.clone(), ProgramId::CS_TEXT_RUN);*/
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_RECTANGLE);
@@ -611,12 +611,12 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_CACHE_IMAGE_TRANSFORM);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.vert")),
+        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR_TRANSFORM);
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR_TRANSFORM);*/
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);
@@ -628,7 +628,7 @@ impl Device {
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT_TRANSFORM);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_HARDWARE_COMPOSITE);*/
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_HARDWARE_COMPOSITE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_IMAGE);
@@ -638,7 +638,7 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT);
-        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.vert")),
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT_TRANSFORM);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.vert")),
@@ -658,7 +658,7 @@ impl Device {
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE_TRANSFORM);*/
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE_TRANSFORM);
         device
     }
 
@@ -868,7 +868,7 @@ impl Device {
         };*/
         /*let converted_data = */Device::update_texture_data(&mut texture.data, x0, y0, width, height, w, h, data, texture.stride);
         //println!("update_texture id:{:?} {} {}", texture_id, texture.data.len(), converted_data.len());
-        
+
         //mem::replace(&mut texture.data, converted_data);
     }
 
@@ -895,12 +895,15 @@ impl Device {
     fn update_texture_data(data: &mut [u8], x_offset: u32, y_offset: u32, width: u32, height: u32, max_width: u32, max_height: u32, new_data: &[u8], stride: u32)/* -> Vec<u8>*/ {
         //let mut data = vec![0u8; (max_width*max_height*stride) as usize];
         assert_eq!(width * height * stride, new_data.len() as u32);
-        println!("update_texture_data x_offset {:?}, y_offset {:?}", x_offset, y_offset);
+        println!("update_texture_data x_offset {:?}, y_offset {:?}, stride  {:?}", x_offset, y_offset, stride);
         println!("      update_texture_data width:{:?} height:{:?} new_data lenght:{:?}", width, height, new_data.len());
+        println!("      update_texture_data max_width:{:?} max_height:{:?} data lenght:{:?}", max_width, max_height, data.len());
         for j in 0..height {
             for i in 0..width*stride {
                 let k = {
-                    if i % 4 == 0 {
+                    if stride == 1 {
+                        i
+                    } else if i % 4 == 0 {
                         i + 2
                     } else if i % 4 == 2 {
                         i - 2
