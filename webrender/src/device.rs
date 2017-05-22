@@ -20,7 +20,6 @@ use gfx::traits::FactoryExt;
 use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
-use gfx_window_glutin;
 use gfx::CombinedError;
 use gfx::format::{Format, Formatted, R8, Rgba32F, Rgba8,Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
 use tiling::PrimitiveInstance;
@@ -384,8 +383,7 @@ pub struct Device {
 
 impl Device {
     pub fn new(window: &glutin::Window) -> Device {
-        let (device, mut factory, main_color, main_depth) =
-            gfx_window_glutin::init_existing::<ColorFormat, DepthFormat>(window);
+        let (device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
         /*println!("Vendor: {:?}", device.get_info().platform_name.vendor);
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
@@ -917,4 +915,24 @@ impl Device {
         assert!(data.len() == max_size);
         data
     }
+}
+
+pub fn init_existing<Cf, Df>(window: &glutin::Window) ->
+                            (device_gl::Device,device_gl::Factory,
+                             gfx::handle::RenderTargetView<R, Cf>, gfx::handle::DepthStencilView<R, Df>)
+where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
+{
+    unsafe { window.make_current().unwrap() };
+    let (device, factory) = device_gl::create(|s|
+        window.get_proc_address(s) as *const std::os::raw::c_void);
+
+    let (width, height) = window.get_inner_size().unwrap();
+    let aa = window.get_pixel_format().multisampling.unwrap_or(0) as gfx::texture::NumSamples;
+    let dim = ((width as f32 * window.hidpi_factor()) as gfx::texture::Size,
+               (height as f32 * window.hidpi_factor()) as gfx::texture::Size,
+               1,
+               aa.into());
+
+    let (color_view, ds_view) = device_gl::create_main_targets_raw(dim, Cf::get_format().0, Df::get_format().0);
+    (device, factory, Typed::new(color_view), Typed::new(ds_view))
 }

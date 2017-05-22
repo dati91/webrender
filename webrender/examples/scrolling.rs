@@ -222,10 +222,10 @@ fn main() {
                 glutin::Event::MouseMoved(x, y) => {
                     cursor_position = WorldPoint::new(x as f32, y as f32);
                 }
-                glutin::Event::MouseWheel(delta, /*_, */event_cursor_position) => {
-                    /*if let Some((x, y)) = event_cursor_position {
+                glutin::Event::MouseWheel(delta, _, event_cursor_position) => {
+                    if let Some((x, y)) = event_cursor_position {
                         cursor_position = WorldPoint::new(x as f32, y as f32);
-                    }*/
+                    }
 
                     const LINE_HEIGHT: f32 = 38.0;
                     let (dx, dy) = match delta {
