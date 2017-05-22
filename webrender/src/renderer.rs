@@ -921,9 +921,19 @@ impl Renderer {
                       batch.key.blend_mode == BlendMode::Alpha ||
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
 
-        for i in 0..batch.key.textures.colors.len() {
-            let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
-            self.device.bind_texture(TextureSampler::color(i), texture_id);
+        match batch.key.kind {
+            AlphaBatchKind::YuvImage(..) => {
+                for i in 0..batch.key.textures.colors.len() {
+                    let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
+                    self.device.bind_yuv_texture(TextureSampler::color(i), texture_id);
+                }
+            },
+            _ => {
+                for i in 0..batch.key.textures.colors.len() {
+                    let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
+                    self.device.bind_texture(TextureSampler::color(i), texture_id);
+                }
+            },
         }
 
         {
@@ -959,7 +969,7 @@ impl Renderer {
             if let Some(id) = self.dither_matrix_texture_id {
                 self.device.bind_texture(TextureSampler::Dither, id);
             }
-            self.device.draw(&mut program, projection, &batch.instances, &batch.key.textures, &batch.key.blend_mode);
+            self.device.draw(&mut program, projection, &batch.instances, &batch.key.blend_mode);
         }
 
         // Handle special case readback for composites.

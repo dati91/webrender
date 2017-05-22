@@ -358,12 +358,12 @@ pub struct Device {
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
     textures: HashMap<TextureId, TextureData>,
-    color0: Texture<R, Srgba8>,
-    color1: Texture<R, Srgba8>,
-    color2: Texture<R, Srgba8>,
+    color0: Texture<R, Rgba8>,
+    color1: Texture<R, Rgba8>,
+    color2: Texture<R, Rgba8>,
     dither: Texture<R, A8>,
     cache_a8: Texture<R, A8>,
-    cache_rgba8: Texture<R, Srgba8>,
+    cache_rgba8: Texture<R, Rgba8>,
     data16: Texture<R, Rgba32F>,
     data32: Texture<R, Rgba32F>,
     data64: Texture<R, Rgba32F>,
@@ -588,30 +588,6 @@ impl Device {
         texture_id
     }
 
-    pub fn _create_texture_ids(&mut self,
-                              count: i32,
-                              _target: TextureTarget,
-                              format: ImageFormat) -> Vec<TextureId> {
-        let mut texture_ids = Vec::new();
-
-        let (w, h) = self.color0.get_size();
-        for _ in 0..count {
-            let texture_id = self.generate_texture_id();
-            let stride = match format {
-                ImageFormat::A8 => A_STRIDE,
-                ImageFormat::RGBA8 => RGBA_STRIDE,
-                _ => unimplemented!(),
-            };
-            let texture_data = vec![0u8; w * h * stride];
-
-            assert!(self.textures.contains_key(&texture_id) == false);
-            self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
-            texture_ids.push(texture_id);
-        }
-
-        texture_ids
-    }
-
     pub fn create_texture_id(&mut self,
                              _target: TextureTarget,
                              format: ImageFormat) -> TextureId {
@@ -730,14 +706,46 @@ impl Device {
             }
         };
         match sampler {
-            TextureSampler::Color0 => Device::update_texture_u8::<_, Srgba8>(&mut self.encoder, &self.color0, texture.data.as_slice(), RGBA_STRIDE),
-            TextureSampler::Color1 => Device::update_texture_u8::<_, Srgba8>(&mut self.encoder, &self.color1, texture.data.as_slice(), RGBA_STRIDE),
-            TextureSampler::Color2 => Device::update_texture_u8::<_, Srgba8>(&mut self.encoder, &self.color2, texture.data.as_slice(), RGBA_STRIDE),
+            TextureSampler::Color0 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color0, texture.data.as_slice(), RGBA_STRIDE),
+            TextureSampler::Color1 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color1, texture.data.as_slice(), RGBA_STRIDE),
+            TextureSampler::Color2 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color2, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::CacheA8 => Device::update_texture_u8::<_, A8>(&mut self.encoder, &self.cache_a8, texture.data.as_slice(), A_STRIDE),
-            TextureSampler::CacheRGBA8 => Device::update_texture_u8::<_, Srgba8>(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice(), RGBA_STRIDE),
+            TextureSampler::CacheRGBA8 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::Dither => Device::update_texture_u8::<_, A8>(&mut self.encoder, &self.dither, texture.data.as_slice(), A_STRIDE),
             _ => println!("There are only 5 samplers supported. {:?}", sampler),
         }
+    }
+
+    pub fn bind_yuv_texture(&mut self,
+                        sampler: TextureSampler,
+                        texture_id: TextureId) {
+        let mut texture = match self.textures.get_mut(&texture_id) {
+            Some(data) => data,
+            None => {
+                println!("Didn't find texture! {}", texture_id.name);
+                return;
+            }
+        };
+        let (w, h) = self.color0.get_size();
+        let new_data = Device::convert_data_to_rgba8(w, h, texture.data.as_slice(), texture.stride);
+        match sampler {
+            TextureSampler::Color0 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color0, new_data.as_slice(), RGBA_STRIDE),
+            TextureSampler::Color1 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color1, new_data.as_slice(), RGBA_STRIDE),
+            TextureSampler::Color2 => Device::update_texture_u8::<_, Rgba8>(&mut self.encoder, &self.color2, new_data.as_slice(), RGBA_STRIDE),
+            _ => println!("The yuv image shouldn't use this sampler: {:?}", sampler),
+        }
+    }
+
+    fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
+        let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
+        for s in 0..orig_stride {
+            for h in 0..height {
+                for w in 0..width {
+                    new_data[s+(w*RGBA_STRIDE)+h*width*RGBA_STRIDE] = data[s+(w*orig_stride)+h*width*orig_stride];
+                }
+            }
+        }
+        return new_data;
     }
 
     pub fn update_sampler_f32(&mut self,
@@ -789,7 +797,6 @@ impl Device {
                 program: &mut Program,
                 proj: &Matrix4D<f32>,
                 instances: &[PrimitiveInstance],
-                _textures: &BatchTextures,
                 blendmode: &BlendMode) {
         program.data.transform = proj.to_row_arrays();
 
@@ -822,7 +829,6 @@ impl Device {
               T::Channel: TextureChannel {
         let tex = &texture.surface;
         let (width, height) = texture.get_size();
-        let resized_data = Device::convert_sampler_data_u8(memory, (width * height * stride) as usize);
         let img_info = gfx::texture::ImageInfoCommon {
             xoffset: 0,
             yoffset: 0,
@@ -834,7 +840,7 @@ impl Device {
             mipmap: 0,
         };
 
-        let data = gfx::memory::cast_slice(resized_data.as_slice());
+        let data = gfx::memory::cast_slice(memory);
         encoder.update_texture::<_, T>(tex, None, img_info, data).unwrap();
     }
 
