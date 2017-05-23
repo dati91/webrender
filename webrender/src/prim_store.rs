@@ -1136,9 +1136,9 @@ impl PrimitiveStore {
         &self.cpu_metadata[index.0]
     }
 
-    pub fn prim_count(&self) -> usize {
+    /*pub fn prim_count(&self) -> usize {
         self.cpu_metadata.len()
-    }
+    }*/
 
     pub fn build_bounding_rect(&mut self,
                                prim_index: PrimitiveIndex,
@@ -1392,7 +1392,7 @@ macro_rules! define_gpu_block {
         #[derive(Clone)]
         #[repr(C)]
         pub struct $name {
-            data: $ty,
+            pub data: $ty,
         }
 
         impl Default for $name {
