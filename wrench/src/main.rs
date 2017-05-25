@@ -223,6 +223,13 @@ impl WindowWrapper {
             WindowWrapper::Headless(_, ref gl) => gl.clone(),
         }
     }
+
+    pub fn window(&self) -> Option<&glutin::Window> {
+        match *self {
+            WindowWrapper::Window(ref w, _) => Some(&*w),
+            WindowWrapper::Headless(ref w, _) => None,
+        }
+    }
 }
 
 fn make_window(size: DeviceUintSize,
@@ -342,6 +349,7 @@ fn main() {
             png::png(&mut wrench, &mut window, reader);
             return;
         } else if let Some(subargs) = args.subcommand_matches("reftest") {
+            println!("{:?}", subargs);
             let (w, h) = window.get_inner_size_pixels();
             let harness = ReftestHarness::new(&mut wrench, &mut window);
             let base_manifest = Path::new("reftests/reftest.list");
@@ -353,7 +361,7 @@ fn main() {
             }
             harness.run(base_manifest, specific_reftest, &reftest_options);
             return;
-        } else if let Some(subargs) = args.subcommand_matches("perf") {
+        /*} else if let Some(subargs) = args.subcommand_matches("perf") {
             let harness = PerfHarness::new(&mut wrench, &mut window);
             let base_manifest = Path::new("benchmarks/benchmarks.list");
             let filename = subargs.value_of("filename").unwrap();
@@ -363,7 +371,7 @@ fn main() {
             let first_filename = subargs.value_of("first_filename").unwrap();
             let second_filename = subargs.value_of("second_filename").unwrap();
             perf::compare(first_filename, second_filename);
-            return;
+            return;*/
         } else {
             panic!("Should never have gotten here! {:?}", args);
         };
@@ -453,9 +461,9 @@ fn main() {
                     CURRENT_FRAME_NUMBER = frame_num;
                 }
 
-                if show_help {
+                /*if show_help {
                     wrench.show_onscreen_help();
-                }
+                }*/
 
                 wrench.render();
                 window.swap_buffers();
@@ -517,7 +525,7 @@ fn main() {
                     },
                     VirtualKeyCode::P => {
                         profiler = !profiler;
-                        wrench.renderer.set_profiler_enabled(profiler);
+                        //wrench.renderer.set_profiler_enabled(profiler);
                     },
                     VirtualKeyCode::L => {
                         do_loop = !do_loop;

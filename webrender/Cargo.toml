@@ -33,10 +33,10 @@ thread_profiler = "0.1.1"
 plane-split = "0.3"
 
 rand = "0.3"
-gfx = "0.14"
-gfx_window_glutin = "0.14"
-gfx_core = "0.6.0"
-gfx_device_gl = "0.13"
+gfx = "0.15"
+gfx_window_glutin = "0.15"
+gfx_core = "0.7"
+gfx_device_gl = "0.14"
 glutin = "0.7"
 
 [dev-dependencies]

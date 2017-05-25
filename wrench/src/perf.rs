@@ -155,15 +155,16 @@ impl<'a> PerfHarness<'a> {
 
         let mut profile = Profile::new();
 
-        for t in manifest.benchmarks {
+        // TODO fix this
+        /*for t in manifest.benchmarks {
             let stats = self.render_yaml(t.test.as_path());
             profile.add(stats);
-        }
+        }*/
 
         profile.save(filename);
     }
 
-    fn render_yaml(&mut self, filename: &Path) -> TestProfile {
+    /*fn render_yaml(&mut self, filename: &Path) -> TestProfile {
         let mut reader = YamlFrameReader::new(filename);
         reader.do_frame(self.wrench);
 
@@ -209,7 +210,7 @@ impl<'a> PerfHarness<'a> {
             paint_time_ns: paint_time / gpu_samples.len() as u64,
             draw_calls: draw_calls,
         }
-    }
+    }*/
 }
 
 fn select_color(base: f32, value: f32) -> &'static str {

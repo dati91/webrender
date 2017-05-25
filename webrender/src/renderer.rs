@@ -49,7 +49,7 @@ use util::TransformedRectKind;
 use webgl_types::GLContextHandleWrapper;
 use webrender_traits::{ColorF, Epoch, PipelineId, RenderNotifier, RenderDispatcher};
 use webrender_traits::{ExternalImageId, ExternalImageType, ImageData, ImageFormat, RenderApiSender};
-use webrender_traits::{DevicePoint, DeviceUintSize};
+use webrender_traits::{DeviceUintRect, DevicePoint, DeviceUintSize};
 use webrender_traits::BlobImageRenderer;
 use webrender_traits::{channel, FontRenderMode};
 use webrender_traits::VRCompositorHandler;
@@ -1489,30 +1489,24 @@ impl Renderer {
         }
     }*/
 
-    /*pub fn read_pixels_rgba8(&self, rect: DeviceUintRect) -> Vec<u8> {
-        let mut pixels = vec![0u8; (4 * rect.size.width * rect.size.height) as usize];
+    pub fn read_pixels_rgba8(&mut self, rect: DeviceUintRect) -> Vec<u8> {
+        println!("{:?}", rect);
+        let mut pixels = vec![0u8; RGBA_STRIDE * (rect.size.width * rect.size.height) as usize];
         self.read_pixels_into(rect, ReadPixelsFormat::Rgba8, &mut pixels);
         pixels
     }
 
-    pub fn read_pixels_into(&self,
+    pub fn read_pixels_into(&mut self,
                             rect: DeviceUintRect,
                             format: ReadPixelsFormat,
                             output: &mut [u8]) {
-        let (gl_format, gl_type, size) = match format {
-            ReadPixelsFormat::Rgba8 => (gl::RGBA, gl::UNSIGNED_BYTE, 4),
-            ReadPixelsFormat::Bgra8 => (get_gl_format_bgra(self.device.gl()), gl::UNSIGNED_BYTE, 4),
+        let stride = match format {
+            ReadPixelsFormat::Rgba8 => RGBA_STRIDE,
+            ReadPixelsFormat::Bgra8 => RGBA_STRIDE,
         };
-        assert_eq!(output.len(), (size * rect.size.width * rect.size.height) as usize);
-        self.device.gl().flush();
-        self.device.gl().read_pixels_into_buffer(rect.origin.x as gl::GLint,
-                                                 rect.origin.y as gl::GLint,
-                                                 rect.size.width as gl::GLsizei,
-                                                 rect.size.height as gl::GLsizei,
-                                                 gl_format,
-                                                 gl_type,
-                                                 output);
-    }*/
+        assert_eq!(output.len(), stride * (rect.size.width * rect.size.height) as usize);
+        self.device.read_pixels(output);
+    }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
     /*pub fn deinit(mut self) {
