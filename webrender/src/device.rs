@@ -345,6 +345,7 @@ pub struct TextureData {
     id: TextureId,
     pub data: Vec<u8>,
     stride: usize,
+    pitch: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -432,13 +433,13 @@ impl Device {
         let mut textures = HashMap::new();
         let (w, h) = color0.get_size();
         let invalid_id = TextureId::invalid();
-        textures.insert(invalid_id, TextureData { id: invalid_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE });
+        textures.insert(invalid_id, TextureData { id: invalid_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE, pitch: w * RGBA_STRIDE });
         let invalid_a8_id = TextureId::invalid_a8();
-        textures.insert(invalid_a8_id, TextureData { id: invalid_a8_id, data: vec![0u8; w * h * A_STRIDE], stride: A_STRIDE });
+        textures.insert(invalid_a8_id, TextureData { id: invalid_a8_id, data: vec![0u8; w * h * A_STRIDE], stride: A_STRIDE, pitch: w * A_STRIDE });
         let dummy_rgba8_id = TextureId { name: DUMMY_RGBA8_ID };
-        textures.insert(dummy_rgba8_id, TextureData { id: dummy_rgba8_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE });
+        textures.insert(dummy_rgba8_id, TextureData { id: dummy_rgba8_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE, pitch: w * RGBA_STRIDE });
         let dummy_a8_id = TextureId { name: DUMMY_A8_ID };
-        textures.insert(dummy_a8_id, TextureData { id: dummy_a8_id, data: vec![0u8; w * h * A_STRIDE], stride: A_STRIDE });
+        textures.insert(dummy_a8_id, TextureData { id: dummy_a8_id, data: vec![0u8; w * h * A_STRIDE], stride: A_STRIDE, pitch: w * A_STRIDE });
         let dither_id = TextureId { name: DITHER_ID };
         let dither_matrix = vec![
             00, 48, 12, 60, 03, 51, 15, 63,
@@ -450,7 +451,7 @@ impl Device {
             10, 58, 06, 54, 09, 57, 05, 53,
             42, 26, 38, 22, 41, 25, 37, 21
         ];
-        textures.insert(dither_id, TextureData { id: dither_id, data: dither_matrix, stride: A_STRIDE });
+        textures.insert(dither_id, TextureData { id: dither_id, data: dither_matrix, stride: A_STRIDE, pitch: 8 * RGBA_STRIDE });
 
         Device {
             device: device,
@@ -622,7 +623,7 @@ impl Device {
             let texture_data = vec![0u8; w * h * stride];
 
             assert!(self.textures.contains_key(&texture_id) == false);
-            self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
+            self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride, pitch: w * stride });
             texture_ids.push(texture_id);
         }
 
@@ -645,7 +646,7 @@ impl Device {
         };
         let texture_data = vec![0u8; w * h * stride];
         assert!(self.textures.contains_key(&texture_id) == false);
-        self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
+        self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride, pitch: w * stride });
         texture_ids.push(texture_id);
 
         texture_id
@@ -693,9 +694,9 @@ impl Device {
                           height: u32,
                           stride: Option<u32>,
                           data: &[u8]) {
-        println!("update_texture {:?} {:?} {:?} {:?} {:?} {:?} {:?}", texture_id, x0, y0, width, height, stride, data.len());
+        println!("update {:?} x0={:?} y0={:?} width={:?} height={:?} stride={:?} size={:?}", texture_id, x0, y0, width, height, stride, data.len());
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
-        println!("update_texture {:?} {:?}", texture.stride, texture.data.len());
+        println!("\ttex.stride={:?} tex.pitch={:?} tex.size={:?}", texture.stride, texture.pitch, texture.data.len());
         //assert!(texture.data.len() >= data.len());
         let (w, _) = self.color0.get_size();
         let row_length = match stride {
@@ -703,14 +704,14 @@ impl Device {
             None => width as usize,
         };
         // Take the stride into account for all rows, except the last one.
-        /*let len = texture.stride * row_length * (height - 1) as usize
-                + width as usize * texture.stride;*/
-        let len = std::cmp::min(texture.stride * row_length * (height - 1) as usize
-                                + width as usize * texture.stride, data.len());
-        println!("{:?} {:?} {:?}", len, row_length * height as usize * texture.stride, data.len());
-        println!("{:?} vs {:?}", w, row_length);
-        let data = &data[0..len as usize];
-        Device::update_texture_data(&mut texture.data, x0 as usize, y0 as usize, row_length as usize, height as usize, w, data, texture.stride);
+        let data_pitch = row_length * texture.stride;
+        let len = data_pitch * (height - 1) as usize + width as usize * texture.stride;
+        //let len = std::cmp::min(texture.stride * row_length * (height - 1) as usize
+        //                        + width as usize * texture.stride, data.len());
+        println!("\tcomputed len={:?}, height*pitch={:?} data_size={:?}", len, height as usize * data_pitch, data.len());
+        println!("\ttarget_width={:?}, row_length={:?}", w, row_length);
+        let data = &data[0 .. len];
+        Device::update_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data);
     }
 
     pub fn resize_texture(&mut self,
@@ -731,29 +732,29 @@ impl Device {
         mem::replace(&mut texture.data, data.to_vec());
     }
 
-    fn update_texture_data(data: &mut [u8], x_offset: usize, y_offset: usize, width: usize, height: usize, max_width: usize, new_data: &[u8], stride: usize) {
-        //assert_eq!(width * height * stride, new_data.len());
-        let len = new_data.len();
+    fn update_texture_data(texture: &mut TextureData,
+        x_offset: usize, y_offset: usize,
+        width: usize, height: usize,
+        data_pitch: usize, new_data: &[u8]
+    ) {
+        assert_eq!(data_pitch * (height-1) + width * texture.stride, new_data.len());
         for j in 0..height {
-            for i in 0..width*stride {
-                // We do nothing if it is not rgba format,
-                // otherwise we have bgra values and switch the red and blue bytes.
-                let k = {
-                    if stride != RGBA_STRIDE {
-                        i
-                    } else if i % 4 == 0 {
-                        i + 2
-                    } else if i % 4 == 2 {
-                        i - 2
-                    } else {
-                        i
-                    }
-                };
-                if (k+j*width*stride) >= len {
-                    return;
-                }
-                // Write the data array with the new values starting from the (offset * stride) position.
-                data[((i+x_offset*stride)+(j+y_offset)*max_width*stride)] = new_data[(k+j*width*stride)];
+            if texture.stride != RGBA_STRIDE {
+                //fast path
+                let dst_offset = x_offset*texture.stride + (j+y_offset)*texture.pitch;
+                let src = &new_data[j * data_pitch ..];
+                texture.data[dst_offset ..].copy_from_slice(&src[.. width*texture.stride]);
+                continue;
+            }
+            for i in 0..width {
+                let offset = (i + x_offset)*texture.stride + (j+y_offset)*texture.pitch;
+                let src = &new_data[j * data_pitch + i * texture.stride ..];
+                assert!(offset + 3 < texture.data.len()); // optimization
+                // convert from BGRA
+                texture.data[offset + 0] = src[2];
+                texture.data[offset + 1] = src[1];
+                texture.data[offset + 2] = src[0];
+                texture.data[offset + 3] = src[3];
             }
         }
     }
