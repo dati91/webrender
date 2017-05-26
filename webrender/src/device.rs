@@ -631,7 +631,6 @@ impl Device {
     pub fn create_texture_id(&mut self,
                              _target: TextureTarget,
                              format: ImageFormat) -> TextureId {
-        let mut texture_ids = Vec::new();
         let (w, h) = self.color0.get_size();
         let texture_id = self.generate_texture_id();
 
@@ -643,10 +642,8 @@ impl Device {
             _ => unimplemented!(),
         };
         let texture_data = vec![0u8; w * h * stride];
-        assert!(self.textures.contains_key(&texture_id) == false);
+        assert!(!self.textures.contains_key(&texture_id));
         self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride, pitch: w * stride });
-        texture_ids.push(texture_id);
-
         texture_id
     }
 
@@ -741,7 +738,8 @@ impl Device {
                 //fast path
                 let dst_offset = x_offset*texture.stride + (j+y_offset)*texture.pitch;
                 let src = &new_data[j * data_pitch ..];
-                texture.data[dst_offset ..].copy_from_slice(&src[.. width*texture.stride]);
+                println!("\tdest len={:?}, src len={:?}", texture.data[dst_offset ..].len(), src[.. width*texture.stride].len());
+                texture.data[dst_offset .. dst_offset + src[.. width*texture.stride].len()].copy_from_slice(&src[.. width*texture.stride]);
                 continue;
             }
             for i in 0..width {
