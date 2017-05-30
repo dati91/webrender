@@ -24,6 +24,7 @@ use gfx::CombinedError;
 use gfx::format::{Format, Formatted, R8, Rgba32F, Rgba8,Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
 use tiling::PrimitiveInstance;
 use renderer::{BlendMode, DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID, MAX_VERTEX_TEXTURE_WIDTH};
+use webrender_traits::DeviceUintRect;
 
 pub type A8 = (R8, Unorm);
 pub const VECS_PER_DATA_16: usize = 1;
@@ -193,7 +194,7 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
     pub fn empty<F>(factory: &mut F, size: [usize; 2]) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
-        Texture::create(factory, None, size, TextureFilter::Nearest)
+        Texture::create(factory, None, size, TextureFilter::Linear)
     }
 
     pub fn create<F>(factory: &mut F,
@@ -389,7 +390,9 @@ impl Device {
         println!("Version: {:?}", device.get_info().version);
         println!("Shading Language: {:?}", device.get_info().shading_language);*/
         let encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
-        let max_texture_size = factory.get_capabilities().max_texture_size as u32;
+        //let max_texture_size = factory.get_capabilities().max_texture_size as u32;
+        println!("max_texture_size {:?}", factory.get_capabilities().max_texture_size);
+        let max_texture_size = MAX_VERTEX_TEXTURE_WIDTH as u32;
 
         let x0 = 0.0;
         let y0 = 0.0;
@@ -480,19 +483,30 @@ impl Device {
         }
     }
 
-    pub fn read_pixels(&mut self, output: &mut [u8]) {
+    pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
+        // TODO add bgra flag
         self.encoder.flush(&mut self.device);
         let tex = self.main_color.raw().get_texture();
-        let buf = self.factory.create_buffer::<u8>(output.len(),
+        let tex_info = tex.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
+        let (w, h, _, _) = self.main_color.get_dimensions();
+        let buf = self.factory.create_buffer::<u8>(w as usize * h as usize * RGBA_STRIDE,
                                                    gfx::buffer::Role::Vertex,
                                                    gfx::memory::Usage::Download,
                                                    gfx::TRANSFER_DST).unwrap();
-        self.encoder.copy_texture_to_buffer_raw(tex, None, tex.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0), buf.raw(), 0).unwrap();
+        self.encoder.copy_texture_to_buffer_raw(tex, None, tex_info, buf.raw(), 0).unwrap();
         self.encoder.flush(&mut self.device);
         {
             let reader = self.factory.read_mapping(&buf).unwrap();
-            for i in 0..output.len() {
-                output[i] = reader[i];
+            let data = &*reader;
+            for j in 0..rect.size.height as usize {
+                for i in 0..rect.size.width as usize {
+                    let offset = i * RGBA_STRIDE + j * rect.size.width as usize * RGBA_STRIDE;
+                    let src = &data[(j + rect.origin.y as usize) * w as usize * RGBA_STRIDE + (i + rect.origin.x as usize) * RGBA_STRIDE ..];
+                    output[offset + 0] = src[0];
+                    output[offset + 1] = src[1];
+                    output[offset + 2] = src[2];
+                    output[offset + 3] = src[3];
+                }
             }
         }
     }
@@ -655,9 +669,9 @@ impl Device {
                         _filter: TextureFilter,
                         _mode: RenderTargetMode,
                         pixels: Option<&[u8]>) {
-        println!("init_texture {:?} {:?} {:?} {:?} {:?} {:?}", texture_id, _width, _height, format, _filter, _mode);
+        println!("init_texture texture_id={:?} _width={:?} _height={:?} format={:?} _filter={:?} _mode={:?}", texture_id, _width, _height, format, _filter, _mode);
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
-        println!("init_texture {:?} {:?}", texture.stride, texture.data.len());
+        println!("init_texture texture.stride={:?} texture.data.len={:?}", texture.stride, texture.data.len());
         let stride = match format {
             ImageFormat::A8 => A_STRIDE,
             ImageFormat::RGBA8 => RGBA_STRIDE,
@@ -710,13 +724,28 @@ impl Device {
     }
 
     pub fn resize_texture(&mut self,
-                          _texture_id: TextureId,
-                          _new_width: u32,
-                          _new_height: u32,
-                          _format: ImageFormat,
+                          texture_id: TextureId,
+                          new_width: u32,
+                          new_height: u32,
+                          format: ImageFormat,
                           _filter: TextureFilter,
                           _mode: RenderTargetMode) {
-          println!("Unimplemented! resize_texture");
+        println!("resize_texture texture_id={:?} new_width={:?} new_height={:?} format={:?} _filter={:?} _mode={:?}", texture_id, new_width, new_height, format, _filter, _mode);
+        let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
+        println!("\ttex.stride={:?} tex.pitch={:?} tex.size={:?}", texture.stride, texture.pitch, texture.data.len());
+        let stride = match format {
+            ImageFormat::A8 => A_STRIDE,
+            ImageFormat::RGBA8 => RGBA_STRIDE,
+            ImageFormat::RG8 => RG_STRIDE,
+            ImageFormat::RGB8 => RGB_STRIDE,
+            _ => unimplemented!(),
+        };
+        if stride != texture.stride {
+            texture.stride = stride;
+            texture.data.clear();
+        }
+        let new_len = new_width as usize * new_height as usize * texture.stride;
+        texture.data.resize(new_len, 0u8);
     }
 
     pub fn deinit_texture(&mut self, texture_id: TextureId) {

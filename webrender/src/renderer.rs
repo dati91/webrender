@@ -1505,7 +1505,7 @@ impl Renderer {
             ReadPixelsFormat::Bgra8 => RGBA_STRIDE,
         };
         assert_eq!(output.len(), stride * (rect.size.width * rect.size.height) as usize);
-        self.device.read_pixels(output);
+        self.device.read_pixels(rect, output);
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
