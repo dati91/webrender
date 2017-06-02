@@ -310,15 +310,15 @@ pub struct Renderer {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    cs_box_shadow: CacheProgram,
-    cs_text_run: CacheProgram,
-    cs_blur: BlurProgram,
+    // cs_box_shadow: CacheProgram,
+    // cs_text_run: CacheProgram,
+    // cs_blur: BlurProgram,
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    cs_clip_rectangle: ClipProgram,
-    cs_clip_image: ClipProgram,
-    cs_clip_border: ClipProgram,
+    // cs_clip_rectangle: ClipProgram,
+    // cs_clip_image: ClipProgram,
+    // cs_clip_border: ClipProgram,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -448,18 +448,18 @@ impl Renderer {
 
         let mut device = Device::new(window);
 
-        let cs_box_shadow = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
-                                                        include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.frag")));
-        let cs_text_run = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
-                                                      include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
-        let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
-                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));
-        let cs_clip_rectangle = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
-                                                            include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")));
-        let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
-                                                        include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));
-        let cs_clip_border = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
-                                                         include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.frag")));
+        // let cs_box_shadow = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
+        //                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.frag")));
+        // let cs_text_run = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
+        //                                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
+        // let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
+        //                                          include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));
+        // let cs_clip_rectangle = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
+        //                                                     include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")));
+        // let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
+        //                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));
+        // let cs_clip_border = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
+        //                                                  include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.frag")));
 
         let ps_rectangle = create_programs!(device, "ps_rectangle");
         let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
@@ -568,12 +568,12 @@ impl Renderer {
             current_frame: None,
             pending_texture_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
-            cs_box_shadow: cs_box_shadow,
-            cs_text_run: cs_text_run,
-            cs_blur: cs_blur,
-            cs_clip_rectangle: cs_clip_rectangle,
-            cs_clip_border: cs_clip_border,
-            cs_clip_image: cs_clip_image,
+            // cs_box_shadow: cs_box_shadow,
+            // cs_text_run: cs_text_run,
+            // cs_blur: cs_blur,
+            // cs_clip_rectangle: cs_clip_rectangle,
+            // cs_clip_border: cs_clip_border,
+            // cs_clip_image: cs_clip_image,
             ps_rectangle: ProgramPair(ps_rectangle),
             ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
             ps_text_run: ProgramPair(ps_text_run),
@@ -1094,7 +1094,7 @@ impl Renderer {
         // TODO(gw): In the future, consider having
         //           fast path blur shaders for common
         //           blur radii with fixed weights.
-        if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
+        /*if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
             /*let _gm = self.gpu_profile.add_marker(GPU_TAG_BLUR);
             let vao = self.blur_vao_id;
 
@@ -1155,7 +1155,7 @@ impl Renderer {
             println!("cs_text_run");
             self.device.draw_cache(&mut self.cs_text_run, projection, &target.text_run_cache_prims, &BlendMode::Alpha);
 
-        }
+        }*/
 
         let mut enable_depth_write = true;
         for batch in &target.alpha_batcher.batch_list.opaque_batches {
@@ -1167,6 +1167,7 @@ impl Renderer {
                               enable_depth_write);
         }
 
+        // self.device.disable_depth_write();
         enable_depth_write = false;
         for batch in &target.alpha_batcher.batch_list.alpha_batches {
             self.submit_batch(batch,
@@ -1185,7 +1186,7 @@ impl Renderer {
                          target: &AlphaRenderTarget,
                          _target_size: DeviceUintSize,
                          projection: &Matrix4D<f32>) {
-        {
+        /*{
             // let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             // self.device.bind_draw_target(Some(render_target), Some(target_size));
             // self.device.disable_depth();
@@ -1281,7 +1282,7 @@ impl Renderer {
                 println!("cs_clip_image");
                 self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode);
             }
-        }
+        }*/
     }
 
     fn update_deferred_resolves(&mut self, frame: &mut Frame) {
