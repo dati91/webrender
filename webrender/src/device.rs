@@ -12,7 +12,6 @@ use rand::Rng;
 use std;
 use glutin;
 use gfx;
-use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
 use gfx::memory::Typed;
 use gfx::Factory;
 use gfx::traits::FactoryExt;
@@ -20,9 +19,10 @@ use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx::CombinedError;
-use gfx::format::{Format, Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
+use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
+use pipelines::{primitive, Position, PrimitiveInstances, Program};
 use prim_store::GRADIENT_DATA_SIZE;
-use tiling::{BlurCommand, CacheClipInstance, PrimitiveInstance};
+use tiling::PrimitiveInstance;
 use renderer::{BlendMode, DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID, MAX_VERTEX_TEXTURE_WIDTH};
 use webrender_traits::DeviceUintRect;
 
@@ -46,295 +46,6 @@ pub const RG_STRIDE: usize = 2;
 pub const RGB_STRIDE: usize = 3;
 pub const RGBA_STRIDE: usize = 4;
 pub const FIRST_UNRESERVED_ID: u32 = DITHER_ID + 1;
-
-pub const ALPHA: Blend = Blend {
-    color: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::ZeroPlus(BlendValue::SourceAlpha),
-        destination: Factor::OneMinus(BlendValue::SourceAlpha),
-    },
-    alpha: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::One,
-        destination: Factor::OneMinus(BlendValue::SourceAlpha),
-    },
-};
-
-pub const PREM_ALPHA: Blend = Blend {
-    color: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::One,
-        destination: Factor::OneMinus(BlendValue::SourceAlpha),
-    },
-    alpha: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::One,
-        destination: Factor::OneMinus(BlendValue::SourceAlpha),
-    },
-};
-
-pub const SUBPIXEL: Blend = Blend {
-    color: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::ZeroPlus(BlendValue::ConstColor),
-        destination: Factor::OneMinus(BlendValue::SourceColor),
-    },
-    alpha: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::ZeroPlus(BlendValue::ConstColor),
-        destination: Factor::OneMinus(BlendValue::SourceColor),
-    },
-};
-
-pub const MULTIPLY: Blend = Blend {
-    color: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::Zero,
-        destination: Factor::ZeroPlus(BlendValue::SourceColor),
-    },
-    alpha: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::Zero,
-        destination: Factor::ZeroPlus(BlendValue::SourceAlpha),
-    },
-};
-
-pub const MAX: Blend = Blend {
-    color: BlendChannel {
-        equation: Equation::Max,
-        source: Factor::One,
-        destination: Factor::One,
-    },
-    alpha: BlendChannel {
-        equation: Equation::Add,
-        source: Factor::One,
-        destination: Factor::One,
-    },
-};
-
-type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
-type CachePSO = gfx::PipelineState<R, cache::Meta>;
-type ClipPSO = gfx::PipelineState<R, clip::Meta>;
-
-gfx_defines! {
-    vertex Position {
-        pos: [f32; 3] = "aPosition",
-    }
-
-    /*vertex Instances {
-        glob_prim_id: i32 = "aGlobalPrimId",
-        primitive_address: i32 = "aPrimitiveAddress",
-        task_index: i32 = "aTaskIndex",
-        clip_task_index: i32 = "aClipTaskIndex",
-        layer_index: i32 = "aLayerIndex",
-        element_index: i32 = "aElementIndex",
-        user_data: [i32; 2] = "aUserData",
-        z_index: i32 = "aZIndex",
-    }*/
-
-    vertex PrimitiveInstances {
-            data0: [i32; 4] = "aData0",
-            data1: [i32; 4] = "aData1",
-    }
-
-    vertex BlurInstances {
-        render_task_index: i32 = "aBlurRenderTaskIndex",
-        source_task_index: i32 = "aBlurSourceTaskIndex",
-        direction: i32 = "aBlurDirection",
-    }
-
-    vertex ClipInstances {
-        render_task_index: i32 = "aClipRenderTaskIndex",
-        layer_index: i32 = "aClipLayerIndex",
-        data_index: i32 = "aClipDataIndex",
-        segment_index: i32 = "aClipSegmentIndex",
-    }
-
-    pipeline primitive {
-        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
-        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<PrimitiveInstances> = (),
-
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
-        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-
-        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-        data32: gfx::TextureSampler<[f32; 4]> = "sData32",
-        data64: gfx::TextureSampler<[f32; 4]> = "sData64",
-        data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-        gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
-        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
-        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
-
-        out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
-                                           gfx::state::MASK_ALL,
-                                           None),
-        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
-        blend_value: gfx::BlendRef = (),
-    }
-
-    pipeline cache {
-        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
-        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<PrimitiveInstances> = (),
-
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        /*color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",*/
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
-        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-
-        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-        data32: gfx::TextureSampler<[f32; 4]> = "sData32",
-        data64: gfx::TextureSampler<[f32; 4]> = "sData64",
-        data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-        //gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
-        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
-        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
-
-        out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
-                                           gfx::state::MASK_ALL,
-                                           None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
-    }
-
-    pipeline blur {
-        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
-        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<BlurInstances> = (),
-
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        /*color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",*/
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
-        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-
-        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-        data32: gfx::TextureSampler<[f32; 4]> = "sData32",
-        data64: gfx::TextureSampler<[f32; 4]> = "sData64",
-        data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-        //gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
-        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
-        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
-
-        out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
-                                           gfx::state::MASK_ALL,
-                                           None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
-    }
-
-    pipeline clip {
-        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
-        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<ClipInstances> = (),
-
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        /*color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",*/
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
-        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-
-        data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-        data32: gfx::TextureSampler<[f32; 4]> = "sData32",
-        data64: gfx::TextureSampler<[f32; 4]> = "sData64",
-        data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-        //gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
-        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
-        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
-
-        out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
-                                           gfx::state::MASK_ALL,
-                                           None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
-    }
-}
-
-impl Position {
-    fn new(p: [f32; 2]) -> Position {
-        Position {
-            pos: [p[0], p[1], 0.0],
-        }
-    }
-}
-
-impl PrimitiveInstances {
-    fn new() -> PrimitiveInstances {
-        PrimitiveInstances {
-            data0: [0; 4],
-            data1: [0; 4],
-        }
-    }
-
-    fn update(&mut self, instance: &PrimitiveInstance) {
-        self.data0 = [instance.data[0], instance.data[1], instance.data[2], instance.data[3]];
-        self.data1 = [instance.data[4], instance.data[5], instance.data[6], instance.data[7]];
-    }
-}
-
-impl BlurInstances {
-    fn new() -> BlurInstances {
-        BlurInstances {
-            render_task_index: 0,
-            source_task_index: 0,
-            direction: 0,
-        }
-    }
-
-    fn update(&mut self, blur_command: &BlurCommand) {
-        self.render_task_index = blur_command.task_id;
-        self.source_task_index = blur_command.src_task_id;
-        self.direction = blur_command.blur_direction;
-    }
-}
-
-impl ClipInstances {
-    fn new() -> ClipInstances {
-        ClipInstances {
-            render_task_index: 0,
-            layer_index: 0,
-            data_index: 0,
-            segment_index: 0,
-        }
-    }
-
-    fn update(&mut self, instance: &CacheClipInstance) {
-        self.render_task_index = instance.task_id;
-        self.layer_index = instance.layer_index;
-        self.data_index = instance.address.0;
-        self.segment_index = instance.segment;
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Texture<R, T> where R: gfx::Resources,
@@ -427,115 +138,6 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
     }
 }
 
-pub struct Program {
-    pub data: primitive::Data<R>,
-    pub pso: (PrimPSO, PrimPSO),
-    pub pso_alpha: (PrimPSO, PrimPSO),
-    pub pso_prem_alpha: (PrimPSO, PrimPSO),
-    pub pso_subpixel: (PrimPSO, PrimPSO),
-    pub slice: gfx::Slice<R>,
-    pub upload: gfx::handle::Buffer<R, PrimitiveInstances>,
-}
-
-impl Program {
-    fn new(data: primitive::Data<R>,
-           psos: (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO),
-           slice: gfx::Slice<R>,
-           upload: gfx::handle::Buffer<R, PrimitiveInstances>)
-           -> Program {
-        Program {
-            data: data,
-            pso: (psos.0, psos.1),
-            pso_alpha: (psos.2, psos.3),
-            pso_prem_alpha: (psos.4, psos.5),
-            pso_subpixel: (psos.6, psos.7),
-            slice: slice,
-            upload: upload,
-        }
-    }
-
-    fn get_pso(&self, blend: &BlendMode, depth_write: bool) -> &PrimPSO {
-        match *blend {
-            BlendMode::Alpha => if depth_write { &self.pso_alpha.0 } else { &self.pso_alpha.1 },
-            BlendMode::PremultipliedAlpha => if depth_write { &self.pso_prem_alpha.0 } else { &self.pso_prem_alpha.1 },
-            BlendMode::Subpixel(..) => if depth_write { &self.pso_subpixel.0 } else { &self.pso_subpixel.1 },
-            _ => if depth_write { &self.pso.0 } else { &self.pso.1 },
-        }
-    }
-}
-
-pub struct CacheProgram {
-    pub data: cache::Data<R>,
-    pub pso: CachePSO,
-    pub pso_alpha: CachePSO,
-    pub slice: gfx::Slice<R>,
-    pub upload: gfx::handle::Buffer<R, PrimitiveInstances>,
-}
-
-impl CacheProgram {
-    fn new(data: cache::Data<R>,
-           psos: (CachePSO, CachePSO),
-           slice: gfx::Slice<R>,
-           upload: gfx::handle::Buffer<R, PrimitiveInstances>)
-           -> CacheProgram {
-        CacheProgram {
-            data: data,
-            pso: psos.0,
-            pso_alpha: psos.1,
-            slice: slice,
-            upload: upload,
-        }
-    }
-
-    fn get_pso(&self, blend: &BlendMode) -> &CachePSO {
-        match *blend {
-            BlendMode::Alpha => &self.pso_alpha,
-            _ => &self.pso,
-        }
-    }
-}
-
-pub struct BlurProgram {
-    pub data: blur::Data<R>,
-    pub pso: gfx::PipelineState<R, blur::Meta>,
-    pub slice: gfx::Slice<R>,
-    pub upload: gfx::handle::Buffer<R, BlurInstances>,
-}
-
-pub struct ClipProgram {
-    pub data: clip::Data<R>,
-    pub pso: ClipPSO,
-    pub pso_multiply: ClipPSO,
-    pub pso_max: ClipPSO,
-    pub slice: gfx::Slice<R>,
-    pub upload: gfx::handle::Buffer<R, ClipInstances>,
-}
-
-impl ClipProgram {
-    fn new(data: clip::Data<R>,
-           psos: (ClipPSO, ClipPSO, ClipPSO),
-           slice: gfx::Slice<R>,
-           upload: gfx::handle::Buffer<R, ClipInstances>)
-           -> ClipProgram {
-        ClipProgram {
-            data: data,
-            pso: psos.0,
-            pso_multiply: psos.1,
-            pso_max: psos.2,
-            slice: slice,
-            upload: upload,
-        }
-    }
-
-    fn get_pso(&self, blend: &BlendMode) -> &ClipPSO {
-        match *blend {
-            BlendMode::Multiply => &self.pso_multiply,
-            BlendMode::Max => &self.pso_max,
-            _ => &self.pso,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct FrameId(usize);
 
@@ -595,31 +197,31 @@ pub enum ShaderError {
 }
 
 pub struct Device {
-    device: device_gl::Device,
-    factory: device_gl::Factory,
-    encoder: gfx::Encoder<R,CB>,
-    textures: HashMap<TextureId, TextureData>,
-    color0: Texture<R, Srgba8>,
-    color1: Texture<R, Rgba8>,
-    color2: Texture<R, Rgba8>,
-    dither: Texture<R, A8>,
-    cache_a8: Texture<R, A8>,
-    cache_rgba8: Texture<R, Rgba8>,
-    data16: Texture<R, Rgba32F>,
-    data32: Texture<R, Rgba32F>,
-    data64: Texture<R, Rgba32F>,
-    data128: Texture<R, Rgba32F>,
-    gradient_data: Texture<R, Srgba8>,
-    layers: Texture<R, Rgba32F>,
-    prim_geo: Texture<R, Rgba32F>,
-    render_tasks: Texture<R, Rgba32F>,
-    resource_rects: Texture<R, Rgba32F>,
-    split_geo: Texture<R, Rgba32F>,
-    max_texture_size: u32,
-    main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
-    main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
-    vertex_buffer: gfx::handle::Buffer<R, Position>,
-    slice: gfx::Slice<R>,
+    pub device: device_gl::Device,
+    pub factory: device_gl::Factory,
+    pub encoder: gfx::Encoder<R,CB>,
+    pub textures: HashMap<TextureId, TextureData>,
+    pub color0: Texture<R, Srgba8>,
+    pub color1: Texture<R, Rgba8>,
+    pub color2: Texture<R, Rgba8>,
+    pub dither: Texture<R, A8>,
+    pub cache_a8: Texture<R, A8>,
+    pub cache_rgba8: Texture<R, Rgba8>,
+    pub data16: Texture<R, Rgba32F>,
+    pub data32: Texture<R, Rgba32F>,
+    pub data64: Texture<R, Rgba32F>,
+    pub data128: Texture<R, Rgba32F>,
+    pub gradient_data: Texture<R, Srgba8>,
+    pub layers: Texture<R, Rgba32F>,
+    pub prim_geo: Texture<R, Rgba32F>,
+    pub render_tasks: Texture<R, Rgba32F>,
+    pub resource_rects: Texture<R, Rgba32F>,
+    pub split_geo: Texture<R, Rgba32F>,
+    pub max_texture_size: u32,
+    pub main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
+    pub main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
+    pub vertex_buffer: gfx::handle::Buffer<R, Position>,
+    pub slice: gfx::Slice<R>,
 }
 
 impl Device {
@@ -745,324 +347,6 @@ impl Device {
         }
     }
 
-    fn create_prim_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO) {
-        let pso1 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::new()
-        ).unwrap();
-
-        let pso2 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_alpha1 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(ALPHA)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_alpha2 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(ALPHA)),
-                out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_prem_alpha1 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(PREM_ALPHA)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_prem_alpha2 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(PREM_ALPHA)),
-            out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_subpixel1 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(SUBPIXEL)),
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        let pso_subpixel2 = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            primitive::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(SUBPIXEL)),
-                out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
-                .. primitive::new()
-            }
-        ).unwrap();
-
-        (pso1, pso2, pso_alpha1, pso_alpha2, pso_prem_alpha1, pso_prem_alpha2, pso_subpixel1, pso_subpixel2)
-    }
-
-    fn create_cache_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (CachePSO, CachePSO) {
-        let pso = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            cache::new()
-        ).unwrap();
-
-
-        let pso_alpha = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            cache::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(ALPHA)),
-                .. cache::new()
-            }
-        ).unwrap();
-
-        (pso, pso_alpha)
-    }
-
-    fn create_clip_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (ClipPSO, ClipPSO, ClipPSO) {
-        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, clip::new()).unwrap();
-
-        let pso_multiply = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            clip::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(MULTIPLY)),
-                .. clip::new()
-            }
-        ).unwrap();
-
-        let pso_max = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            clip::Init {
-                out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
-                            gfx::state::MASK_ALL,
-                            Some(MAX)),
-                .. clip::new()
-            }
-        ).unwrap();
-        (pso, pso_multiply, pso_max)
-    }
-
-    pub fn create_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> Program {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = PrimitiveInstances::new();
-            }
-        }
-
-        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                   gfx::buffer::Role::Vertex,
-                                                   gfx::memory::Usage::Data,
-                                                   gfx::TRANSFER_DST).unwrap();
-
-        let data = primitive::Data {
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: instances,
-            color0: (self.color0.clone().view, self.color0.clone().sampler),
-            color1: (self.color1.clone().view, self.color1.clone().sampler),
-            color2: (self.color2.clone().view, self.color2.clone().sampler),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),
-            cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
-            data16: (self.data16.clone().view, self.data16.clone().sampler),
-            data32: (self.data32.clone().view, self.data32.clone().sampler),
-            data64: (self.data64.clone().view, self.data64.clone().sampler),
-            data128: (self.data128.clone().view, self.data128.clone().sampler),
-            gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
-            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
-            blend_value: [0.0, 0.0, 0.0, 0.0]
-        };
-        let psos = self.create_prim_psos(vert_src, frag_src);
-        Program::new(data, psos, self.slice.clone(), upload)
-    }
-
-    pub fn create_cache_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> CacheProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = PrimitiveInstances::new();
-            }
-        }
-
-        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                   gfx::buffer::Role::Vertex,
-                                                   gfx::memory::Usage::Data,
-                                                   gfx::TRANSFER_DST).unwrap();
-
-        let data = cache::Data {
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: instances,
-            color0: (self.color0.clone().view, self.color0.clone().sampler),
-            /*color1: (self.color1.clone().view, self.color1.clone().sampler),
-            color2: (self.color2.clone().view, self.color2.clone().sampler),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),*/
-            cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
-            data16: (self.data16.clone().view, self.data16.clone().sampler),
-            data32: (self.data32.clone().view, self.data32.clone().sampler),
-            data64: (self.data64.clone().view, self.data64.clone().sampler),
-            data128: (self.data128.clone().view, self.data128.clone().sampler),
-            //gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
-            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
-            //blend_value: [0.0, 0.0, 0.0, 0.0]
-        };
-        let psos = self.create_cache_psos(vert_src, frag_src);
-        CacheProgram::new(data, psos, self.slice.clone(), upload)
-    }
-
-    pub fn create_blur_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> BlurProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = BlurInstances::new();
-            }
-        }
-
-        let blur_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                        gfx::buffer::Role::Vertex,
-                                                        gfx::memory::Usage::Data,
-                                                        gfx::TRANSFER_DST).unwrap();
-
-        let data = blur::Data {
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: blur_instances,
-            color0: (self.color0.clone().view, self.color0.clone().sampler),
-            /*color1: (self.color1.clone().view, self.color1.clone().sampler),
-            color2: (self.color2.clone().view, self.color2.clone().sampler),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),*/
-            cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
-            data16: (self.data16.clone().view, self.data16.clone().sampler),
-            data32: (self.data32.clone().view, self.data32.clone().sampler),
-            data64: (self.data64.clone().view, self.data64.clone().sampler),
-            data128: (self.data128.clone().view, self.data128.clone().sampler),
-            //gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
-            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
-            //blend_value: [0.0, 0.0, 0.0, 0.0]
-        };
-        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
-        BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:upload}
-    }
-
-    pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = ClipInstances::new();
-            }
-        }
-
-        let cache_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                         gfx::buffer::Role::Vertex,
-                                                         gfx::memory::Usage::Data,
-                                                         gfx::TRANSFER_DST).unwrap();
-
-        let data = clip::Data {
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: cache_instances,
-            color0: (self.color0.clone().view, self.color0.clone().sampler),
-            /*color1: (self.color1.clone().view, self.color1.clone().sampler),
-            color2: (self.color2.clone().view, self.color2.clone().sampler),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),*/
-            cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
-            data16: (self.data16.clone().view, self.data16.clone().sampler),
-            data32: (self.data32.clone().view, self.data32.clone().sampler),
-            data64: (self.data64.clone().view, self.data64.clone().sampler),
-            data128: (self.data128.clone().view, self.data128.clone().sampler),
-            //gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
-            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
-            //blend_value: [0.0, 0.0, 0.0, 0.0]
-        };
-        let psos = self.create_clip_psos(vert_src, frag_src);
-        ClipProgram::new(data, psos, self.slice.clone(), upload)
-    }
-
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
     }
@@ -1141,7 +425,7 @@ impl Device {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         assert!(!(texture.data.len() < data.len()));
         //println!("\ttex.stride={:?} tex.pitch={:?} tex.size={:?}", texture.stride, texture.pitch, texture.data.len());
-        let (w, _) = self.color0.get_size();
+        //let (w, _) = self.color0.get_size();
         let row_length = match stride {
             Some(value) => value as usize / texture.stride,
             None => width as usize,
@@ -1314,6 +598,49 @@ impl Device {
         self.encoder.flush(&mut self.device);
     }
 
+    pub fn create_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> Program {
+        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
+        {
+            let mut writer = self.factory.write_mapping(&upload).unwrap();
+            for i in 0..MAX_INSTANCE_COUNT {
+                writer[i] = PrimitiveInstances::new();
+            }
+        }
+
+        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
+                                                   gfx::buffer::Role::Vertex,
+                                                   gfx::memory::Usage::Data,
+                                                   gfx::TRANSFER_DST).unwrap();
+
+        let data = primitive::Data {
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: self.vertex_buffer.clone(),
+            ibuf: instances,
+            color0: (self.color0.clone().view, self.color0.clone().sampler),
+            color1: (self.color1.clone().view, self.color1.clone().sampler),
+            color2: (self.color2.clone().view, self.color2.clone().sampler),
+            dither: (self.dither.clone().view, self.dither.clone().sampler),
+            cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
+            cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
+            data16: (self.data16.clone().view, self.data16.clone().sampler),
+            data32: (self.data32.clone().view, self.data32.clone().sampler),
+            data64: (self.data64.clone().view, self.data64.clone().sampler),
+            data128: (self.data128.clone().view, self.data128.clone().sampler),
+            gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
+            layers: (self.layers.clone().view, self.layers.clone().sampler),
+            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
+            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
+            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
+            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
+            out_color: self.main_color.raw().clone(),
+            out_depth: self.main_depth.clone(),
+            blend_value: [0.0, 0.0, 0.0, 0.0]
+        };
+        let psos = self.create_prim_psos(vert_src, frag_src);
+        Program::new(data, psos, self.slice.clone(), upload)
+    }
+
     pub fn draw(&mut self,
                 program: &mut Program,
                 proj: &Matrix4D<f32>,
@@ -1339,60 +666,6 @@ impl Device {
 
         self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
-    }
-
-    pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
-       program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i].update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
-    }
-
-    pub fn draw_blur(&mut self, program: &mut BlurProgram, proj: &Matrix4D<f32>, blur_commands: &[BlurCommand]) {
-       program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-            for (i, blur_command) in blur_commands.iter().enumerate() {
-                writer[i].update(blur_command);
-            }
-        }
-
-        {
-            program.slice.instances = Some((blur_commands.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.pso, &program.data);
-    }
-
-    pub fn draw_clip(&mut self, program: &mut ClipProgram, proj: &Matrix4D<f32>, instances: &[CacheClipInstance], blendmode: &BlendMode) {
-       program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i].update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
     }
 
     pub fn update_texture_surface<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,

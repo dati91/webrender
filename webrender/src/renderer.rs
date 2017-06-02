@@ -9,7 +9,7 @@
 //!
 //! [renderer]: struct.Renderer.html
 
-use device::{BlurProgram, ClipProgram, CacheProgram, Device, TextureId, TextureFilter, TextureTarget, Program, ShaderError};
+use device::{Device, TextureId, TextureFilter, TextureTarget, ShaderError};
 use device::{VECS_PER_DATA_16, VECS_PER_DATA_32, VECS_PER_DATA_64, VECS_PER_DATA_128};
 use device::{VECS_PER_LAYER, VECS_PER_PRIM_GEOM, VECS_PER_RENDER_TASK};
 use device::{VECS_PER_RESOURCE_RECTS, VECS_PER_GRADIENT_DATA, VECS_PER_SPLIT_GEOM};
@@ -27,6 +27,7 @@ use prim_store::{GradientData, SplitGeometry};
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::RenderTaskData;
+use pipelines::Program;
 use std;
 use std::cmp;
 use std::collections::HashMap;
@@ -1183,9 +1184,9 @@ impl Renderer {
 
     fn draw_alpha_target(&mut self,
                          _render_target: (TextureId, i32),
-                         target: &AlphaRenderTarget,
+                         _target: &AlphaRenderTarget,
                          _target_size: DeviceUintSize,
-                         projection: &Matrix4D<f32>) {
+                         _projection: &Matrix4D<f32>) {
         /*{
             // let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             // self.device.bind_draw_target(Some(render_target), Some(target_size));

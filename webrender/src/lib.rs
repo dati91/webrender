@@ -67,6 +67,7 @@ mod gpu_store;
 #[allow(dead_code)]
 mod internal_types;
 mod mask_cache;
+mod pipelines;
 mod prim_store;
 mod print_tree;
 //mod profiler;
