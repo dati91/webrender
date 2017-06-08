@@ -410,7 +410,7 @@ impl FrameBuilder {
         }
 
         let prim = RectanglePrimitive {
-            color: *color,
+            color: color.correct(),
         };
 
         let prim_index = self.add_primitive(clip_and_scroll,
@@ -788,14 +788,14 @@ impl FrameBuilder {
             cache_dirty: true,
             glyph_instances: Vec::new(),
             color_texture_id: SourceTexture::Invalid,
-            color: *color,
+            color: color.correct(),
             render_mode: render_mode,
             glyph_options: glyph_options,
             resource_address: GpuStoreAddress(0),
         };
 
         let prim_gpu = TextRunPrimitiveGpu {
-            color: *color,
+            color: color.correct(),
         };
 
         self.add_primitive(clip_and_scroll,

@@ -537,6 +537,27 @@ impl ColorF {
         }
     }
 
+    pub fn correct(&self) -> ColorF {
+        fn to_linear(val: f32) -> f32 {
+            let alpha: f32 = 0.055;
+            let div: f32 = 12.92;
+            let limit: f32 = 0.04045;
+            let exp: f32 = 2.4;
+            if val > limit {
+                ((val + alpha) / (1.0 + alpha)).powf(exp)
+            } else {
+                val / div
+            }
+        }
+
+        ColorF {
+            r: to_linear(self.r),
+            g: to_linear(self.g),
+            b: to_linear(self.b),
+            a: self.a,
+        }
+    }
+
     pub fn scale_rgb(&self, scale: f32) -> ColorF {
         ColorF {
             r: self.r * scale,
