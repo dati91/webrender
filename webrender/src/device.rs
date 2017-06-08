@@ -37,6 +37,8 @@ pub const VECS_PER_PRIM_GEOM: usize = 2;
 pub const VECS_PER_RENDER_TASK: usize = 3;
 pub const VECS_PER_RESOURCE_RECTS: usize = 1;
 pub const VECS_PER_SPLIT_GEOM: usize = 3;
+pub const LAYER_TEXTURE_WIDTH: usize = 1017;
+pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
 pub const TEXTURE_HEIGTH: usize = 8;
 pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
 pub const MAX_INSTANCE_COUNT: usize = 2000;
@@ -256,16 +258,16 @@ impl Device {
         let cache_rgba8 = Texture::empty(&mut factory, texture_size).unwrap();
 
         // TODO define some maximum boundaries for texture height
-        let data16_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_DATA_16, TEXTURE_HEIGTH * 4]).unwrap();
-        let data32_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_DATA_32, TEXTURE_HEIGTH]).unwrap();
-        let data64_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_DATA_64, TEXTURE_HEIGTH]).unwrap();
-        let data128_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_DATA_128, TEXTURE_HEIGTH * 4]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4]).unwrap();
+        let data32_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
+        let data64_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
+        let data128_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4]).unwrap();
         let gradient_data = Texture::empty(&mut factory, [2* GRADIENT_DATA_SIZE, TEXTURE_HEIGTH * 10]).unwrap();
-        let layers_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_LAYER, 64]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_PRIM_GEOM, TEXTURE_HEIGTH]).unwrap();
-        let render_tasks_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_RENDER_TASK, TEXTURE_HEIGTH]).unwrap();
-        let resource_rects = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_RESOURCE_RECTS, TEXTURE_HEIGTH * 2]).unwrap();
-        let split_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH / VECS_PER_SPLIT_GEOM, TEXTURE_HEIGTH * 2]).unwrap();
+        let layers_tex = Texture::empty(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
+        let resource_rects = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2]).unwrap();
+        let split_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2]).unwrap();
 
         let mut textures = HashMap::new();
         let (w, h) = color0.get_size();
