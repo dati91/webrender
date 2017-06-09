@@ -469,10 +469,10 @@ impl Renderer {
         let ps_image = create_programs!(device, "ps_image");
         let ps_yuv_image =
             vec![ProgramPair(create_programs!(device, "ps_yuv_image_nv12_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_planar_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_nv12_709")),
+                 ProgramPair(create_programs!(device, "ps_yuv_image_planar_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_planar_709")),
+                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_709"))];
 
         let ps_border_corner = create_programs!(device, "ps_border_corner");
