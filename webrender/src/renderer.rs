@@ -27,7 +27,7 @@ use prim_store::{GradientData, SplitGeometry};
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::RenderTaskData;
-use pipelines::Program;
+use pipelines::{ClipProgram, Program};
 use std;
 use std::cmp;
 use std::collections::HashMap;
@@ -317,7 +317,7 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    // cs_clip_rectangle: ClipProgram,
+    cs_clip_rectangle: ClipProgram,
     // cs_clip_image: ClipProgram,
     // cs_clip_border: ClipProgram,
 
@@ -455,8 +455,8 @@ impl Renderer {
         //                                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
         // let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
         //                                          include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));
-        // let cs_clip_rectangle = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
-        //                                                     include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")));
+        let cs_clip_rectangle = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
+                                                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")));
         // let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
         //                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));
         // let cs_clip_border = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
@@ -572,7 +572,7 @@ impl Renderer {
             // cs_box_shadow: cs_box_shadow,
             // cs_text_run: cs_text_run,
             // cs_blur: cs_blur,
-            // cs_clip_rectangle: cs_clip_rectangle,
+            cs_clip_rectangle: cs_clip_rectangle,
             // cs_clip_border: cs_clip_border,
             // cs_clip_image: cs_clip_image,
             ps_rectangle: ProgramPair(ps_rectangle),
@@ -1183,11 +1183,11 @@ impl Renderer {
     }
 
     fn draw_alpha_target(&mut self,
-                         _render_target: (TextureId, i32),
-                         _target: &AlphaRenderTarget,
+                         render_target: (TextureId, i32),
+                         target: &AlphaRenderTarget,
                          _target_size: DeviceUintSize,
-                         _projection: &Matrix4D<f32>) {
-        /*{
+                         projection: &Matrix4D<f32>) {
+        {
             // let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             // self.device.bind_draw_target(Some(render_target), Some(target_size));
             // self.device.disable_depth();
@@ -1212,7 +1212,7 @@ impl Renderer {
             // If we have border corner clips, the first step is to clear out the
             // area in the clip mask. This allows drawing multiple invididual clip
             // in regions below.
-            if !target.clip_batcher.border_clears.is_empty() {
+            /*if !target.clip_batcher.border_clears.is_empty() {
                 /*let _gm2 = GpuMarker::new(self.device.rc_gl(), "clip borders [clear]");
                 self.device.set_blend(false);
                 let shader = self.cs_clip_border.get(&mut self.device).unwrap();
@@ -1242,7 +1242,7 @@ impl Renderer {
                                           &projection);*/
                 println!("cs_clip_border, borders");
                 self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.borders, &BlendMode::Max);
-            }
+            }*/
 
             // switch to multiplicative blending
             /*self.device.set_blend(true);
@@ -1259,10 +1259,14 @@ impl Renderer {
                                           &BatchTextures::no_texture(),
                                           &projection);*/
                 println!("cs_clip_rectangle");
-                self.device.draw_clip(&mut self.cs_clip_rectangle, projection, &target.clip_batcher.rectangles, &blend_mode);
+                self.device.draw_clip(&mut self.cs_clip_rectangle,
+                                      projection,
+                                      &target.clip_batcher.rectangles,
+                                      &blend_mode,
+                                      render_target.0);
             }
             // draw image masks
-            for (mask_texture_id, items) in target.clip_batcher.images.iter() {
+            /*for (mask_texture_id, items) in target.clip_batcher.images.iter() {
                 /*let _gm2 = GpuMarker::new(self.device.rc_gl(), "clip images");
                 let textures = BatchTextures {
                     colors: [
@@ -1282,8 +1286,8 @@ impl Renderer {
 
                 println!("cs_clip_image");
                 self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode);
-            }
-        }*/
+            }*/
+        }
     }
 
     fn update_deferred_resolves(&mut self, frame: &mut Frame) {

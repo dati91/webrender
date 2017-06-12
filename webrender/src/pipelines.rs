@@ -621,7 +621,7 @@ impl Device {
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:upload}
     }
 
-    pub fn _create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
+    pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
         {
             let mut writer = self.factory.write_mapping(&upload).unwrap();
@@ -693,23 +693,5 @@ impl Device {
 
         self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
         self.encoder.draw(&program.slice, &program.pso, &program.data);
-    }
-
-    pub fn _draw_clip(&mut self, program: &mut ClipProgram, proj: &Matrix4D<f32>, instances: &[CacheClipInstance], blendmode: &BlendMode) {
-       program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i]._update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
     }
 }

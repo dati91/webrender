@@ -207,7 +207,7 @@ fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &Lay
         LayoutRect::new(LayoutPoint::new(50.0, 50.0), LayoutSize::new(100.0, 100.0)),
         webrender_traits::BorderRadius::uniform(20.0));
 
-    builder.push_clip_region(bounds, vec![complex], Some(mask))
+    builder.push_clip_region(bounds, vec![complex], None)
 }
 
 

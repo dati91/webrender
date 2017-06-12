@@ -14,15 +14,17 @@ use glutin;
 use gfx;
 use gfx::memory::Typed;
 use gfx::Factory;
+use gfx::texture::Kind;
 use gfx::traits::FactoryExt;
 use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx::CombinedError;
 use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
-use pipelines::{primitive, Position, PrimitiveInstances, Program};
+use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32, Srgb};
+use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program};
 use prim_store::GRADIENT_DATA_SIZE;
-use tiling::PrimitiveInstance;
+use tiling::{CacheClipInstance, PrimitiveInstance};
 use renderer::{BlendMode, DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID, MAX_VERTEX_TEXTURE_WIDTH};
 use webrender_traits::DeviceUintRect;
 
@@ -82,7 +84,7 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
-        let tex_kind = gfx::texture::Kind::D2(width, height, gfx::texture::AaMode::Single);
+        let tex_kind = Kind::D2(width, height, gfx::texture::AaMode::Single);
         let filter_method = match filter {
             TextureFilter::Nearest => gfx::texture::FilterMethod::Scale,
             TextureFilter::Linear => gfx::texture::FilterMethod::Bilinear,
@@ -186,10 +188,10 @@ pub struct TextureId {
 
 #[derive(Debug)]
 pub struct TextureData {
-    id: TextureId,
+    pub id: TextureId,
     pub data: Vec<u8>,
-    stride: usize,
-    pitch: usize,
+    pub stride: usize,
+    pub pitch: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -668,6 +670,97 @@ impl Device {
 
         self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
+    }
+
+    pub fn draw_clip(&mut self,
+                     program: &mut ClipProgram,
+                     proj: &Matrix4D<f32>,
+                     instances: &[CacheClipInstance],
+                     blendmode: &BlendMode,
+                     texture_id: TextureId) {
+        program.data.transform = proj.to_row_arrays();
+        let mut text_data = self.textures.get_mut(&texture_id).unwrap();
+        println!("text_data.id={:?} text_data.stride={:?}, text_data.pitch={:?}", text_data.id, text_data.stride, text_data.pitch);
+
+        let color_texture = {
+            let (w, h) = self.color0.get_size();
+            self.factory.create_texture_immutable_u8::<(R8_G8_B8_A8, Srgb)>
+                (Kind::D2(w as u16, h as u16, gfx::texture::AaMode::Single), &[&text_data.data[0..]]).unwrap()
+        };
+
+        let render_target_view_raw = {
+            let desc = gfx::texture::RenderDesc {
+                channel: gfx::format::ChannelType::Unorm,
+                level: 0,
+                layer: None,
+            };
+            self.factory.view_texture_as_render_target_raw(&color_texture.0.raw(), desc).unwrap()
+        };
+
+        let depth_texture = {
+            let (w, h) = self.color0.get_size();
+            self.factory.create_texture_immutable_u8::<DepthFormat>
+                (Kind::D2(w as u16, h as u16, gfx::texture::AaMode::Single), &[&text_data.data[0..]]).unwrap()
+        };
+
+        let depth_stencil: gfx::handle::DepthStencilView<R, DepthFormat> = {
+            let desc = gfx::texture::DepthStencilDesc {
+                level: 0,
+                layer: None,
+                flags: gfx::texture::DepthStencilFlags::all(),
+            };
+
+            self.factory.view_texture_as_depth_stencil_raw(&depth_texture.0.raw(), desc).map(Typed::new).unwrap()
+        };
+
+        program.data.out_color = render_target_view_raw.clone();
+        program.data.out_depth = depth_stencil.clone();
+
+        {
+            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i]._update(inst);
+            }
+        }
+
+        {
+            program.slice.instances = Some((instances.len() as u32, 0));
+        }
+
+        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
+
+
+        self.encoder.flush(&mut self.device);
+        let tex = program.data.out_color.get_texture();
+        let tex_info = tex.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
+        let (w, h, _, _) = program.data.out_color.get_dimensions();
+        let buf = self.factory.create_buffer::<u8>(w as usize * h as usize * text_data.stride,
+                                                   gfx::buffer::Role::Vertex,
+                                                   gfx::memory::Usage::Download,
+                                                   gfx::TRANSFER_DST).unwrap();
+        self.encoder.copy_texture_to_buffer_raw(tex, None, tex_info, buf.raw(), 0).unwrap();
+        self.encoder.flush(&mut self.device);
+        {
+            let reader = self.factory.read_mapping(&buf).unwrap();
+            let data = &*reader;
+            for j in 0..h as usize {
+                for i in 0..w as usize {
+                    let offset = i * text_data.stride + j * w as usize * text_data.stride;
+                    let src = &data[j * w as usize * text_data.stride + i * text_data.stride ..];
+                    text_data.data[offset + 0] = src[0];
+                    text_data.data[offset + 1] = src[1];
+                    text_data.data[offset + 2] = src[2];
+                    text_data.data[offset + 3] = src[3];
+
+                }
+            }
+        }
+
+        //program.data.out_color = self.main_color.raw().clone();
+        //program.data.out_depth = self.main_depth.clone();
+        //self.main_color = Typed::new(program.data.out_color.clone());
+        //self.main_depth = program.data.out_depth.clone();
     }
 
     pub fn update_texture_surface<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
