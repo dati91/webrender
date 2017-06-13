@@ -200,6 +200,9 @@ gfx_defines! {
         ibuf: gfx::InstanceBuffer<ClipInstances> = (),
 
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+        color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
+        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
+        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
@@ -207,6 +210,7 @@ gfx_defines! {
         data32: gfx::TextureSampler<[f32; 4]> = "sData32",
         data64: gfx::TextureSampler<[f32; 4]> = "sData64",
         data128: gfx::TextureSampler<[f32; 4]> = "sData128",
+        gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -218,7 +222,7 @@ gfx_defines! {
                                                   gfx::format::ChannelType::Unorm),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
+        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 }
 
@@ -266,7 +270,7 @@ impl BlurInstances {
 }
 
 impl ClipInstances {
-    pub fn _new() -> ClipInstances {
+    pub fn new() -> ClipInstances {
         ClipInstances {
             render_task_index: 0,
             layer_index: 0,
@@ -275,7 +279,7 @@ impl ClipInstances {
         }
     }
 
-    pub fn _update(&mut self, instance: &CacheClipInstance) {
+    pub fn update(&mut self, instance: &CacheClipInstance) {
         self.render_task_index = instance.task_id;
         self.layer_index = instance.layer_index;
         self.data_index = instance.address.0;
@@ -626,7 +630,7 @@ impl Device {
         {
             let mut writer = self.factory.write_mapping(&upload).unwrap();
             for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = ClipInstances::_new();
+                writer[i] = ClipInstances::new();
             }
         }
 
@@ -641,12 +645,16 @@ impl Device {
             vbuf: self.vertex_buffer.clone(),
             ibuf: cache_instances,
             color0: (self.color0.clone().view, self.color0.clone().sampler),
+            color1: (self.color1.clone().view, self.color1.clone().sampler),
+            color2: (self.color2.clone().view, self.color2.clone().sampler),
+            dither: (self.dither.clone().view, self.dither.clone().sampler),
             cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
             cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
             data16: (self.data16.clone().view, self.data16.clone().sampler),
             data32: (self.data32.clone().view, self.data32.clone().sampler),
             data64: (self.data64.clone().view, self.data64.clone().sampler),
             data128: (self.data128.clone().view, self.data128.clone().sampler),
+            gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),

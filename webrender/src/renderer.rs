@@ -1187,6 +1187,7 @@ impl Renderer {
                          target: &AlphaRenderTarget,
                          _target_size: DeviceUintSize,
                          projection: &Matrix4D<f32>) {
+        println!("draw_alpha_target render_target={:?} _target_size={:?}", render_target, _target_size);
         {
             // let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             // self.device.bind_draw_target(Some(render_target), Some(target_size));
@@ -1247,7 +1248,7 @@ impl Renderer {
             // switch to multiplicative blending
             /*self.device.set_blend(true);
             self.device.set_blend_mode_multiply();*/
-            let blend_mode = BlendMode::Multiply;
+            let blend_mode = BlendMode::None;
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
