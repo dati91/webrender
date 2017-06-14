@@ -63,3 +63,6 @@ name = "scrolling"
 
 [[example]]
 name = "yuv"
+
+[[example]]
+name = "gradient"
