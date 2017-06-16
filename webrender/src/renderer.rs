@@ -58,6 +58,8 @@ use webrender_traits::{YuvColorSpace, YuvFormat};
 use webrender_traits::{YUV_COLOR_SPACES, YUV_FORMATS};
 
 use glutin;
+use gfx;
+use gfx::memory::Pod;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub const DUMMY_RGBA8_ID: u32 = 2;
@@ -158,7 +160,7 @@ impl<L: GpuStoreLayout> GpuDataTexture<L> {
         }
     }
 
-    fn init<T: Default>(&mut self,
+    fn init<T: Default + Pod>(&mut self,
                         device: &mut Device,
                         sampler: TextureSampler,
                         data: &mut Vec<T>,
@@ -180,12 +182,10 @@ impl<L: GpuStoreLayout> GpuDataTexture<L> {
 
         match L::image_format() {
             ImageFormat::RGBAF32 => {
-                device.update_sampler_f32(sampler,
-                                          unsafe { slice::from_raw_parts(data.as_ptr() as *const f32, data.len() * size as usize) });
+                device.update_sampler_f32(sampler, gfx::memory::cast_slice(data));
             },
             ImageFormat::RGBA8 => {
-                device.update_sampler_u8(sampler,
-                                         unsafe { slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * size as usize) });
+                device.update_sampler_u8(sampler, gfx::memory::cast_slice(data));
             },
             _ => unimplemented!(), // Invalid, A8, RGB8, RG8
         }

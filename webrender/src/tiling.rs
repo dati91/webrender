@@ -31,6 +31,8 @@ use webrender_traits::{LayerToWorldTransform, MixBlendMode, PipelineId, Transfor
 use webrender_traits::{WorldPoint4D, WorldToLayerTransform};
 use webrender_traits::{YuvColorSpace, YuvFormat};
 
+use gfx::memory::Pod;
+
 // Special sentinel value recognized by the shader. It is considered to be
 // a dummy task that doesn't mask out anything.
 const OPAQUE_TASK_INDEX: RenderTaskIndex = RenderTaskIndex(i32::MAX as usize);
@@ -1619,3 +1621,9 @@ pub struct Frame {
     // patch the data structures.
     pub deferred_resolves: Vec<DeferredResolve>,
 }
+
+macro_rules! impl_pod {
+    ( ty = $($ty:ty)* ) => { $( unsafe impl Pod for $ty {} )* };
+}
+
+impl_pod! { ty = GpuBlock16 GpuBlock32 GpuBlock64 GpuBlock128 PackedLayer RenderTaskData PrimitiveGeometry GradientData SplitGeometry TexelRect }

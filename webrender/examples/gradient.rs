@@ -120,6 +120,7 @@ fn main() {
             color: ColorU::new(255u8, 0u8, 0u8, 255u8).into(),
         },
     ];
+
     let gradient = builder.create_gradient(LayoutPoint::new(0.0, 0.0),
                                            LayoutPoint::new(0.0, 300.0),
                                            stops,
