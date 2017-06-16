@@ -70,30 +70,36 @@ pub struct Texture<R, T> where R: gfx::Resources,
 
 impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat {
 
-    pub fn empty<F>(factory: &mut F, size: [usize; 2]) -> Result<Texture<R, T>, CombinedError>
+    pub fn empty<F>(factory: &mut F, size: [usize; 2], filter_method: TextureFilter, texture_kind: TextureTarget) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
-        Texture::create(factory, None, size, TextureFilter::Linear)
+        Texture::create(factory, None, size, filter_method, texture_kind)
     }
 
     pub fn create<F>(factory: &mut F,
                      data: Option<&[&[u8]]>,
                      size: [usize; 2],
-                     filter: TextureFilter
+                     filter: TextureFilter,
+                     texture_kind: TextureTarget,
     ) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
-        let tex_kind = Kind::D2(width, height, gfx::texture::AaMode::Single);
+        let tex_kind = match texture_kind {
+            TextureTarget::Array => Kind::D2Array(width, height, 1, gfx::texture::AaMode::Single),
+            _ => Kind::D2(width, height, gfx::texture::AaMode::Single),
+        };
+
         let filter_method = match filter {
             TextureFilter::Nearest => gfx::texture::FilterMethod::Scale,
             TextureFilter::Linear => gfx::texture::FilterMethod::Bilinear,
         };
 
-        let sampler_info = gfx::texture::SamplerInfo::new(
+        let mut sampler_info = gfx::texture::SamplerInfo::new(
             filter_method,
             gfx::texture::WrapMode::Clamp
         );
+        sampler_info.wrap_mode = (gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Tile);
 
         let (surface, view, format) = {
             use gfx::{format, texture};
@@ -148,7 +154,7 @@ pub struct FrameId(usize);
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureTarget {
     Default,
-    _Array,
+    Array,
     External,
     Rect,
 }
@@ -209,7 +215,7 @@ pub struct Device {
     pub color1: Texture<R, Rgba8>,
     pub color2: Texture<R, Rgba8>,
     pub dither: Texture<R, A8>,
-    pub cache_a8: Texture<R, A8>,
+    pub cache_a8: Texture<R, Rgba8>,
     pub cache_rgba8: Texture<R, Rgba8>,
     pub data16: Texture<R, Rgba32F>,
     pub data32: Texture<R, Rgba32F>,
@@ -254,24 +260,24 @@ impl Device {
 
         let (w, h, _, _) = main_color.get_dimensions();
         let texture_size = [std::cmp::max(MAX_VERTEX_TEXTURE_WIDTH, h as usize), std::cmp::max(MAX_VERTEX_TEXTURE_WIDTH, w as usize)];
-        let color0 = Texture::empty(&mut factory, texture_size).unwrap();
-        let color1 = Texture::empty(&mut factory, texture_size).unwrap();
-        let color2 = Texture::empty(&mut factory, texture_size).unwrap();
-        let dither = Texture::empty(&mut factory, [8, 8]).unwrap();
-        let cache_a8 = Texture::empty(&mut factory, texture_size).unwrap();
-        let cache_rgba8 = Texture::empty(&mut factory, texture_size).unwrap();
+        let color0 = Texture::empty(&mut factory, texture_size, TextureFilter::Linear, TextureTarget::Default).unwrap();
+        let color1 = Texture::empty(&mut factory, texture_size, TextureFilter::Linear, TextureTarget::Default).unwrap();
+        let color2 = Texture::empty(&mut factory, texture_size, TextureFilter::Linear, TextureTarget::Default).unwrap();
+        let dither = Texture::empty(&mut factory, [8, 8], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let cache_a8 = Texture::empty(&mut factory, texture_size, TextureFilter::Linear, TextureTarget::Array).unwrap();
+        let cache_rgba8 = Texture::empty(&mut factory, texture_size, TextureFilter::Linear, TextureTarget::Array).unwrap();
 
         // TODO define some maximum boundaries for texture height
-        let data16_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4]).unwrap();
-        let data32_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
-        let data64_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
-        let data128_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4]).unwrap();
-        let gradient_data = Texture::empty(&mut factory, [2* GRADIENT_DATA_SIZE, TEXTURE_HEIGTH * 10]).unwrap();
-        let layers_tex = Texture::empty(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
-        let render_tasks_tex = Texture::empty(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
-        let resource_rects = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2]).unwrap();
-        let split_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2]).unwrap();
+        let data16_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let data32_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let data64_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let data128_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 4], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let gradient_data = Texture::empty(&mut factory, [2* GRADIENT_DATA_SIZE, TEXTURE_HEIGTH * 10], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let layers_tex = Texture::empty(&mut factory, [LAYER_TEXTURE_WIDTH, 64], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let resource_rects = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let split_geo_tex = Texture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, TEXTURE_HEIGTH * 2], TextureFilter::Nearest, TextureTarget::Default).unwrap();
 
         let mut textures = HashMap::new();
         let (w, h) = color0.get_size();
@@ -282,7 +288,7 @@ impl Device {
         let dummy_rgba8_id = TextureId { name: DUMMY_RGBA8_ID };
         textures.insert(dummy_rgba8_id, TextureData { id: dummy_rgba8_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE, pitch: w * RGBA_STRIDE });
         let dummy_a8_id = TextureId { name: DUMMY_A8_ID };
-        textures.insert(dummy_a8_id, TextureData { id: dummy_a8_id, data: vec![0u8; w * h * A_STRIDE], stride: A_STRIDE, pitch: w * A_STRIDE });
+        textures.insert(dummy_a8_id, TextureData { id: dummy_a8_id, data: vec![0u8; w * h * RGBA_STRIDE], stride: RGBA_STRIDE, pitch: w * RGBA_STRIDE });
         let dither_id = TextureId { name: DITHER_ID };
         let dither_matrix = vec![
             00, 48, 12, 60, 03, 51, 15, 63,
@@ -525,7 +531,7 @@ impl Device {
             TextureSampler::Color0 => Device::update_texture_surface(&mut self.encoder, &self.color0, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::Color1 => Device::update_texture_surface(&mut self.encoder, &self.color1, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::Color2 => Device::update_texture_surface(&mut self.encoder, &self.color2, texture.data.as_slice(), RGBA_STRIDE),
-            TextureSampler::CacheA8 => Device::update_texture_surface(&mut self.encoder, &self.cache_a8, texture.data.as_slice(), A_STRIDE),
+            TextureSampler::CacheA8 => Device::update_texture_surface(&mut self.encoder, &self.cache_a8, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::CacheRGBA8 => Device::update_texture_surface(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice(), RGBA_STRIDE),
             TextureSampler::Dither => Device::update_texture_surface(&mut self.encoder, &self.dither, texture.data.as_slice(), A_STRIDE),
             _ => println!("There are only 5 samplers supported. {:?}", sampler),
@@ -542,6 +548,7 @@ impl Device {
                 return;
             }
         };
+
         let (w, h) = self.color0.get_size();
         let new_data = Device::convert_data_to_rgba8(w, h, texture.data.as_slice(), texture.stride);
         match sampler {

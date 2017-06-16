@@ -501,8 +501,8 @@ impl Renderer {
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
 
         let texture_cache = TextureCache::new(max_texture_size);
-        let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Default);
-        let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Default);
+        let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Array);
+        let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Array);
         let dither_matrix_texture_id = if options.enable_dithering {
                                            Some(TextureId::new(DITHER_ID, TextureTarget::Default))
                                        } else {

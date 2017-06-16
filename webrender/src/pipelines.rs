@@ -114,7 +114,7 @@ gfx_defines! {
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
         dither: gfx::TextureSampler<f32> = "sDither",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
@@ -144,7 +144,7 @@ gfx_defines! {
         ibuf: gfx::InstanceBuffer<PrimitiveInstances> = (),
 
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
@@ -172,7 +172,7 @@ gfx_defines! {
         ibuf: gfx::InstanceBuffer<BlurInstances> = (),
 
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
@@ -203,7 +203,7 @@ gfx_defines! {
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
         dither: gfx::TextureSampler<f32> = "sDither",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
