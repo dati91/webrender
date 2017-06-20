@@ -684,6 +684,7 @@ impl Device {
 
         self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
+        self.encoder.flush(&mut self.device);
     }
 
     pub fn draw_clip(&mut self,
