@@ -111,7 +111,36 @@ fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
 fn create_programs(device: &mut Device, filename: &str) -> ProgramPair {
     let program = create_program(device, filename);
     filename.to_owned().push_str("_transform");
-    ProgramPair((program, create_program(device, filename)))
+    ProgramPair((program, create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename),
+                 create_program(device, filename),create_program(device, filename)))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -609,7 +638,36 @@ impl From<std::io::Error> for InitError {
     fn from(err: std::io::Error) -> Self { InitError::Thread(err) }
 }
 
-struct ProgramPair((Program, Program));
+struct ProgramPair((Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program,
+                    Program, Program));
 
 impl ProgramPair {
     fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
