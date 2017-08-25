@@ -32,6 +32,7 @@ use render_backend::RenderBackend;
 use render_task::RenderTaskData;
 use pipelines::{BlurProgram, CacheProgram, ClipProgram, Program};
 use std;
+use std::boxed::Box;
 use std::cmp;
 use std::collections::{HashMap, VecDeque};
 use std::f32;
@@ -72,6 +73,21 @@ pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DITHER_ID: u32 = 4;
 
+
+impl ProgramPair {
+    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
+        match transform_kind {
+            TransformedRectKind::AxisAligned => &mut (self.0).0,
+            TransformedRectKind::Complex => &mut (self.0).1,
+        }
+    }
+
+    pub fn reset_upload_offset(&mut self) {
+        (self.0).0.reset_upload_offset();
+        (self.0).1.reset_upload_offset();
+    }
+}
+
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
     let mut file = File::open(path_str).unwrap();
@@ -107,6 +123,8 @@ fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
     let ps = get_shader_source(filename, ".frag.fx");
     device.create_clip_program(vs.as_slice(), ps.as_slice())
 }
+
+struct ProgramPair((Program, Program));
 
 fn create_programs(device: &mut Device, filename: &str) -> ProgramPair {
     let program = create_program(device, filename);
@@ -505,9 +523,9 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    cs_clip_rectangle: ClipProgram,
-    cs_clip_image: ClipProgram,
-    cs_clip_border: ClipProgram,
+    cs_clip_rectangle: Box<ClipProgram>,
+    cs_clip_image: Box<ClipProgram>,
+    cs_clip_border: Box<ClipProgram>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -516,25 +534,24 @@ pub struct Renderer {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    ps_rectangle: ProgramPair,
+    ps_rectangle: Box<ProgramPair>,
+    ps_rectangle_clip: Box<ProgramPair>,
+    ps_text_run: Box<ProgramPair>,
+    ps_text_run_subpixel: Box<ProgramPair>,
+    ps_image: Box<ProgramPair>,
+    ps_yuv_image: Vec<Box<ProgramPair>>,
+    ps_border_corner: Box<ProgramPair>,
+    ps_border_edge: Box<ProgramPair>,
+    ps_gradient: Box<ProgramPair>,
+    ps_angle_gradient: Box<ProgramPair>,
+    ps_radial_gradient: Box<ProgramPair>,
+    ps_box_shadow: Box<ProgramPair>,
+    ps_cache_image: Box<ProgramPair>,
 
-    ps_rectangle_clip: ProgramPair,
-    ps_text_run: ProgramPair,
-    ps_text_run_subpixel: ProgramPair,
-    ps_image: ProgramPair,
-    ps_yuv_image: Vec<ProgramPair>,
-    ps_border_corner: ProgramPair,
-    ps_border_edge: ProgramPair,
-    ps_gradient: ProgramPair,
-    ps_angle_gradient: ProgramPair,
-    ps_radial_gradient: ProgramPair,
-    ps_box_shadow: ProgramPair,
-    ps_cache_image: ProgramPair,
-
-    ps_blend: Program,
-    ps_hw_composite: Program,
-    ps_split_composite: Program,
-    ps_composite: Program,
+    ps_blend: Box<Program>,
+    ps_hw_composite: Box<Program>,
+    ps_split_composite: Box<Program>,
+    ps_composite: Box<Program>,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -613,22 +630,6 @@ impl From<std::io::Error> for InitError {
     fn from(err: std::io::Error) -> Self { InitError::Thread(err) }
 }
 
-struct ProgramPair((Program, Program));
-
-impl ProgramPair {
-    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
-        match transform_kind {
-            TransformedRectKind::AxisAligned => &mut (self.0).0,
-            TransformedRectKind::Complex => &mut (self.0).1,
-        }
-    }
-
-    pub fn reset_upload_offset(&mut self) {
-        (self.0).0.reset_upload_offset();
-        (self.0).1.reset_upload_offset();
-    }
-}
-
 impl Renderer {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
@@ -669,44 +670,44 @@ impl Renderer {
                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
         let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
                                                  include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));*/
-        let cs_clip_rectangle = create_clip_program(&mut device, "cs_clip_rectangle");
-        let cs_clip_image = create_clip_program(&mut device, "cs_clip_image");
-        let cs_clip_border = create_clip_program(&mut device, "cs_clip_border");
+        let cs_clip_rectangle = box create_clip_program(&mut device, "cs_clip_rectangle");
+        let cs_clip_image = box create_clip_program(&mut device, "cs_clip_image");
+        let cs_clip_border = box create_clip_program(&mut device, "cs_clip_border");
 
-        let ps_rectangle = create_programs(&mut device, "ps_rectangle");
-        let ps_rectangle_clip = create_programs(&mut device, "ps_rectangle_clip");
-        let ps_text_run = create_programs(&mut device, "ps_text_run");
-        let ps_text_run_subpixel = create_programs(&mut device, "ps_text_run_subpixel");
-        let ps_image = create_programs(&mut device, "ps_image");
+        let ps_rectangle = box create_programs(&mut device, "ps_rectangle");
+        let ps_rectangle_clip = box create_programs(&mut device, "ps_rectangle_clip");
+        let ps_text_run = box create_programs(&mut device, "ps_text_run");
+        let ps_text_run_subpixel = box create_programs(&mut device, "ps_text_run_subpixel");
+        let ps_image = box create_programs(&mut device, "ps_image");
         let ps_yuv_image =
-            vec![create_programs(&mut device, "ps_yuv_image_nv12_601"),
-                 create_programs(&mut device, "ps_yuv_image_nv12_709"),
-                 create_programs(&mut device, "ps_yuv_image_planar_601"),
-                 create_programs(&mut device, "ps_yuv_image_planar_709"),
-                 create_programs(&mut device, "ps_yuv_image_interleaved_601"),
-                 create_programs(&mut device, "ps_yuv_image_interleaved_709")];
+            vec![box create_programs(&mut device, "ps_yuv_image_nv12_601"),
+                 box create_programs(&mut device, "ps_yuv_image_nv12_709"),
+                 box create_programs(&mut device, "ps_yuv_image_planar_601"),
+                 box create_programs(&mut device, "ps_yuv_image_planar_709"),
+                 box create_programs(&mut device, "ps_yuv_image_interleaved_601"),
+                 box create_programs(&mut device, "ps_yuv_image_interleaved_709")];
 
-        let ps_border_corner = create_programs(&mut device, "ps_border_corner");
-        let ps_border_edge = create_programs(&mut device, "ps_border_edge");
+        let ps_border_corner = box create_programs(&mut device, "ps_border_corner");
+        let ps_border_edge = box create_programs(&mut device, "ps_border_edge");
 
         let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
             if options.enable_dithering {
-                (create_programs(&mut device, "ps_gradient_dither"),
-                 create_programs(&mut device, "ps_angle_gradient_dither"),
-                 create_programs(&mut device, "ps_radial_gradient_dither"))
+                (box create_programs(&mut device, "ps_gradient_dither"),
+                 box create_programs(&mut device, "ps_angle_gradient_dither"),
+                 box create_programs(&mut device, "ps_radial_gradient_dither"))
             } else {
-                (create_programs(&mut device, "ps_gradient"),
-                 create_programs(&mut device, "ps_angle_gradient"),
-                 create_programs(&mut device, "ps_radial_gradient"))
+                (box create_programs(&mut device, "ps_gradient"),
+                 box create_programs(&mut device, "ps_angle_gradient"),
+                 box create_programs(&mut device, "ps_radial_gradient"))
             };
 
-        let ps_box_shadow = create_programs(&mut device, "ps_box_shadow");
-        let ps_cache_image = create_programs(&mut device, "ps_cache_image");
+        let ps_box_shadow = box create_programs(&mut device, "ps_box_shadow");
+        let ps_cache_image = box create_programs(&mut device, "ps_cache_image");
 
-        let ps_blend = create_program(&mut device, "ps_blend");
-        let ps_hw_composite = create_program(&mut device, "ps_hardware_composite");
-        let ps_split_composite = create_program(&mut device, "ps_split_composite");
-        let ps_composite = create_program(&mut device, "ps_composite");
+        let ps_blend = box create_program(&mut device, "ps_blend");
+        let ps_hw_composite = box create_program(&mut device, "ps_hardware_composite");
+        let ps_split_composite = box create_program(&mut device, "ps_split_composite");
+        let ps_composite = box create_program(&mut device, "ps_composite");
 
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));

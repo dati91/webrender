@@ -36,6 +36,9 @@
 //! [newframe]: ../webrender_traits/struct.RenderApi.html#method.set_display_list
 //! [notifier]: renderer/struct.Renderer.html#method.set_render_notifier
 
+
+#![feature(box_syntax)]
+
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
