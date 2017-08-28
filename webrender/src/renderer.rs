@@ -11,7 +11,7 @@
 
 //use debug_colors;
 //use debug_render::DebugRenderer;
-use device::{Device, TextureId, TextureFilter, TextureTarget, ShaderError};
+use device::{Device, FrameId, TextureId, TextureFilter, TextureTarget, ShaderError};
 use device::{VECS_PER_DATA_16, VECS_PER_DATA_32, VECS_PER_DATA_64, VECS_PER_DATA_128};
 use device::{VECS_PER_LAYER, VECS_PER_PRIM_GEOM, VECS_PER_RENDER_TASK};
 use device::{VECS_PER_RESOURCE_RECTS, VECS_PER_GRADIENT_DATA, VECS_PER_SPLIT_GEOM};
@@ -25,8 +25,8 @@ use internal_types::{CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{TextureUpdateList, PackedVertex, RenderTargetMode};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
 use internal_types::{BatchTextures, TextureSampler};
-//use profiler::{Profiler, BackendProfileCounters};
-//use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
+use profiler::{Profiler, BackendProfileCounters};
+use profiler::{/*GpuProfileTag,*/ RendererProfileTimers, RendererProfileCounters};
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::RenderTaskData;
@@ -189,6 +189,25 @@ impl ImageBufferKind {
 pub enum RendererKind {
     Native,
     OSMesa,
+}
+
+#[derive(Debug)]
+pub struct CpuProfile {
+    pub frame_id: FrameId,
+    pub composite_time_ns: u64,
+    pub draw_calls: usize,
+}
+
+impl CpuProfile {
+    fn new(frame_id: FrameId,
+           composite_time_ns: u64,
+           draw_calls: usize) -> CpuProfile {
+        CpuProfile {
+            frame_id: frame_id,
+            composite_time_ns: composite_time_ns,
+            draw_calls: draw_calls,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -563,9 +582,9 @@ pub struct Renderer {
     //debug: DebugRenderer,
     render_target_debug: bool,
     enable_batcher: bool,
-    //backend_profile_counters: BackendProfileCounters,
-    //profile_counters: RendererProfileCounters,
-    //profiler: Profiler,
+    backend_profile_counters: BackendProfileCounters,
+    profile_counters: RendererProfileCounters,
+    profiler: Profiler,
     last_time: u64,
 
     color_render_targets: Vec<TextureId>,
@@ -612,7 +631,7 @@ pub struct Renderer {
 
     // List of profile results from previous frames. Can be retrieved
     // via get_frame_profiles().
-    //cpu_profiles: VecDeque<CpuProfile>,
+    cpu_profiles: VecDeque<CpuProfile>,
     //gpu_profiles: VecDeque<GpuProfile>,
 }
 
@@ -713,7 +732,7 @@ impl Renderer {
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
 
         let texture_cache = TextureCache::new(max_texture_size);
-        //let backend_profile_counters = BackendProfileCounters::new();
+        let backend_profile_counters = BackendProfileCounters::new();
 
         let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Array);
         let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Array);
@@ -784,7 +803,7 @@ impl Renderer {
                                                  blob_image_renderer,
                                                  backend_vr_compositor,
                                                  initial_window_size);
-            backend.run(/*backend_profile_counters*/);
+            backend.run(backend_profile_counters);
         })};
 
         let gpu_cache_texture = CacheTexture::new(&mut device);
@@ -825,9 +844,9 @@ impl Renderer {
             //debug: debug_renderer,
             render_target_debug: render_target_debug,
             enable_batcher: options.enable_batcher,
-            //backend_profile_counters: BackendProfileCounters::new(),
-            //profile_counters: RendererProfileCounters::new(),
-            //profiler: Profiler::new(),
+            backend_profile_counters: BackendProfileCounters::new(),
+            profile_counters: RendererProfileCounters::new(),
+            profiler: Profiler::new(),
             enable_profiler: options.enable_profiler,
             max_recorded_profiles: options.max_recorded_profiles,
             clear_framebuffer: options.clear_framebuffer,
@@ -847,7 +866,7 @@ impl Renderer {
             external_image_handler: None,
             external_images: HashMap::default(),
             vr_compositor_handler: vr_compositor,
-            //cpu_profiles: VecDeque::new(),
+            cpu_profiles: VecDeque::new(),
             //gpu_profiles: VecDeque::new(),
             gpu_cache_texture: gpu_cache_texture,
         };
@@ -914,7 +933,7 @@ impl Renderer {
         // Pull any pending results and return the most recent.
         while let Ok(msg) = self.result_rx.try_recv() {
             match msg {
-                ResultMsg::NewFrame(mut frame, texture_update_list/*, profile_counters*/) => {
+                ResultMsg::NewFrame(mut frame, texture_update_list, profile_counters) => {
                     self.pending_texture_updates.push(texture_update_list);
                     if let Some(ref mut frame) = frame.frame {
                         // TODO(gw): This whole message / Frame / RendererFrame stuff
@@ -923,7 +942,7 @@ impl Renderer {
                             self.pending_gpu_cache_updates.push(update_list);
                         }
                     }
-                    //self.backend_profile_counters = profile_counters;
+                    self.backend_profile_counters = profile_counters;
 
                     // Update the list of available epochs for use during reftests.
                     // This is a workaround for https://github.com/servo/servo/issues/13149.
@@ -967,11 +986,11 @@ impl Renderer {
     }
 
     /// Retrieve (and clear) the current list of recorded frame profiles.
-    /*pub fn get_frame_profiles(&mut self) -> (Vec<CpuProfile>, Vec<GpuProfile>) {
-        let cpu_profiles = self.cpu_profiles.drain(..).collect();
-        let gpu_profiles = self.gpu_profiles.drain(..).collect();
-        (cpu_profiles, gpu_profiles)
-    }*/
+    pub fn get_frame_profiles(&mut self) -> /*(*/Vec<CpuProfile>/*, Vec<GpuProfile>)*/ {
+        /*let cpu_profiles = */self.cpu_profiles.drain(..).collect()//;
+        //let gpu_profiles = self.gpu_profiles.drain(..).collect();
+        //(cpu_profiles, gpu_profiles)
+    }
 
     /// Renders the current frame.
     ///
@@ -982,7 +1001,7 @@ impl Renderer {
 
         if let Some(mut frame) = self.current_frame.take() {
             if let Some(ref mut frame) = frame.frame {
-                //let mut profile_timers = RendererProfileTimers::new();
+                let mut profile_timers = RendererProfileTimers::new();
 
                 {
                     //Note: avoiding `self.gpu_profile.add_marker` - it would block here
@@ -1000,10 +1019,11 @@ impl Renderer {
                     }*/
                 }
 
-                //let cpu_frame_id = profile_timers.cpu_time.profile(|| {
-                //    let cpu_frame_id = {
+                let cpu_frame_id = profile_timers.cpu_time.profile(|| {
+                    let cpu_frame_id = {
                         //let _gm = GpuMarker::new(self.device.rc_gl(), "begin frame");
                         //let frame_id = self.device.begin_frame(frame.device_pixel_ratio);
+                        let frame_id = self.device.begin_frame();
                         //self.gpu_profile.begin_frame(frame_id);
 
                         //self.device.disable_scissor();
@@ -1019,17 +1039,17 @@ impl Renderer {
                         //self.device.flush();
 
 
-                        //frame_id
-                    //};
+                        frame_id
+                    };
 
                     self.draw_tile_frame(frame, &framebuffer_size);
                     self.flush();
 
                     //self.gpu_profile.end_frame();
-                    //cpu_frame_id
-                //});
+                    cpu_frame_id
+                });
 
-                /*let current_time = precise_time_ns();
+                let current_time = precise_time_ns();
                 let ns = current_time - self.last_time;
                 self.profile_counters.frame_time.set(ns);
 
@@ -1044,12 +1064,12 @@ impl Renderer {
                 }
 
                 if self.enable_profiler {
-                    self.profiler.draw_profile(&mut self.device,
+                    self.profiler.draw_profile(//&mut self.device,
                                                &frame.profile_counters,
                                                &self.backend_profile_counters,
                                                &self.profile_counters,
                                                &mut profile_timers,
-                                               &mut self.debug);
+                                               /*&mut self.debug*/);
                 }
 
                 self.profile_counters.reset();
@@ -1057,12 +1077,12 @@ impl Renderer {
 
                 let debug_size = DeviceUintSize::new(framebuffer_size.width as u32,
                                                      framebuffer_size.height as u32);
-                self.debug.render(&mut self.device, &debug_size);
+                //self.debug.render(&mut self.device, &debug_size);
                 {
-                    let _gm = GpuMarker::new(self.device.rc_gl(), "end frame");
+                    //let _gm = GpuMarker::new(self.device.rc_gl(), "end frame");
                     self.device.end_frame();
                 }
-                self.last_time = current_time;*/
+                self.last_time = current_time;
             }
 
             // Restore frame - avoid borrow checker!
@@ -1793,7 +1813,7 @@ impl Renderer {
 
     /*pub fn debug_renderer<'a>(&'a mut self) -> &'a mut DebugRenderer {
         &mut self.debug
-    }
+    }*/
 
     pub fn get_profiler_enabled(&mut self) -> bool {
         self.enable_profiler
@@ -1807,7 +1827,7 @@ impl Renderer {
         write_profile(filename);
     }
 
-    fn draw_render_target_debug(&mut self,
+    /*fn draw_render_target_debug(&mut self,
                                 framebuffer_size: &DeviceUintSize) {
         if self.render_target_debug {
             // TODO(gw): Make the layout of the render targets a bit more sophisticated.

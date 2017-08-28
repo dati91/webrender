@@ -12,6 +12,7 @@ use internal_types::{RendererFrame};
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use clip_scroll_tree::{ClipScrollTree, ScrollStates};
 //use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
+use profiler::TextureCacheProfileCounters;
 use resource_cache::ResourceCache;
 use scene::{Scene, SceneProperties};
 use std::cmp;
@@ -1092,16 +1093,16 @@ impl Frame {
                  gpu_cache: &mut GpuCache,
                  display_lists: &DisplayListMap,
                  device_pixel_ratio: f32,
-                 pan: LayerPoint/*,
-                 texture_cache_profile: &mut TextureCacheProfileCounters,
+                 pan: LayerPoint,
+                 texture_cache_profile: &mut TextureCacheProfileCounters/*,
                  gpu_cache_profile: &mut GpuCacheProfileCounters*/)
                  -> RendererFrame {
         self.clip_scroll_tree.update_all_node_transforms(pan);
         let frame = self.build_frame(resource_cache,
                                      gpu_cache,
                                      display_lists,
-                                     device_pixel_ratio/*,
-                                     texture_cache_profile,
+                                     device_pixel_ratio,
+                                     texture_cache_profile/*,
                                      gpu_cache_profile*/);
         // Expire any resources that haven't been used for `cache_expiry_frames`.
         let num_frames_back = self.frame_builder_config.cache_expiry_frames;
@@ -1114,8 +1115,8 @@ impl Frame {
                    resource_cache: &mut ResourceCache,
                    gpu_cache: &mut GpuCache,
                    display_lists: &DisplayListMap,
-                   device_pixel_ratio: f32/*,
-                   texture_cache_profile: &mut TextureCacheProfileCounters,
+                   device_pixel_ratio: f32,
+                   texture_cache_profile: &mut TextureCacheProfileCounters/*,
                    gpu_cache_profile: &mut GpuCacheProfileCounters*/)
                    -> RendererFrame {
         let mut frame_builder = self.frame_builder.take();
@@ -1125,8 +1126,8 @@ impl Frame {
                           self.id,
                           &mut self.clip_scroll_tree,
                           display_lists,
-                          device_pixel_ratio/*,
-                          texture_cache_profile,
+                          device_pixel_ratio,
+                          texture_cache_profile/*,
                           gpu_cache_profile*/)
         );
         self.frame_builder = frame_builder;

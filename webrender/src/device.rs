@@ -277,6 +277,7 @@ pub struct Device {
     pub main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
     pub vertex_buffer: gfx::handle::Buffer<R, Position>,
     pub slice: gfx::Slice<R>,
+    pub frame_id: FrameId,
     //pub rtv: gfx::handle::RenderTargetView<R, ColorFormat>,
     //pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
 }
@@ -369,6 +370,7 @@ impl Device {
             main_depth: main_depth,
             vertex_buffer: vertex_buffer,
             slice: slice,
+            frame_id: FrameId::new(0),
             //rtv: rtv,
             //dsv: dsv,
         };
@@ -569,7 +571,7 @@ impl Device {
                 return;
             }
         };
-        println!("bind_texture {:?} {:?} {:?} {:?}", texture_id, sampler, texture.stride, texture.data.len());
+        //println!("bind_texture {:?} {:?} {:?} {:?}", texture_id, sampler, texture.stride, texture.data.len());
         //println!("texture.data={:?}", &texture.data[0..64]);
         match sampler {
             TextureSampler::Color0 => Device::update_texture_surface(&mut self.encoder, &self.color0, texture.data.as_slice(), RGBA_STRIDE),
@@ -871,6 +873,14 @@ impl Device {
         }
         assert!(data.len() == max_size);
         data
+    }
+
+    pub fn begin_frame(&self) -> FrameId {
+        self.frame_id
+    }
+
+    pub fn end_frame(&mut self) {
+        self.frame_id.0 += 1;
     }
 }
 

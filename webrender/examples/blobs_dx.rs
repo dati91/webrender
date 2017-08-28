@@ -290,7 +290,6 @@ fn main() {
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
         blob_image_renderer: Some(Box::new(CheckerboardRenderer::new(Arc::clone(&workers)))),
-        enable_profiler: true,
         .. Default::default()
     };
 
@@ -308,18 +307,10 @@ fn main() {
     let layout_size = LayoutSize::new(width as f32, height as f32);
     let mut builder = wt::DisplayListBuilder::new(pipeline_id, layout_size);
 
-    let blob_img1 = api.generate_image_key();
-    api.add_image(
-        blob_img1,
-        wt::ImageDescriptor::new(500, 500, wt::ImageFormat::BGRA8, true),
-        wt::ImageData::new_blob_image(serialize_blob(wt::ColorU::new(50, 50, 150, 255))),
-        Some(128),
-    );
-
     let blob_img2 = api.generate_image_key();
     api.add_image(
         blob_img2,
-        wt::ImageDescriptor::new(200, 200, wt::ImageFormat::BGRA8, true),
+        wt::ImageDescriptor::new(20, 20, wt::ImageFormat::BGRA8, true),
         wt::ImageData::new_blob_image(serialize_blob(wt::ColorU::new(50, 150, 50, 255))),
         None,
     );
@@ -333,25 +324,20 @@ fn main() {
                                   wt::MixBlendMode::Normal,
                                   Vec::new());
 
-    let clip = builder.push_clip_region(&bounds, vec![], None);
-    builder.push_image(
-        (30, 30).by(500, 500),
-        clip,
-        wt::LayoutSize::new(500.0, 500.0),
-        wt::LayoutSize::new(0.0, 0.0),
-        wt::ImageRendering::Auto,
-        blob_img1,
-    );
 
-    let clip = builder.push_clip_region(&bounds, vec![], None);
-    builder.push_image(
-        (600, 600).by(200, 200),
-        clip,
-        wt::LayoutSize::new(200.0, 200.0),
-        wt::LayoutSize::new(0.0, 0.0),
-        wt::ImageRendering::Auto,
-        blob_img2,
-    );    
+    for y in 0..30 {
+        for x in 0..30 {
+            let clip = builder.push_clip_region(&bounds, vec![], None);
+            builder.push_image(
+                (y*25, x*25).by(20, 20),
+                clip,
+                wt::LayoutSize::new(20.0, 20.0),
+                wt::LayoutSize::new(0.0, 0.0),
+                wt::ImageRendering::Auto,
+                blob_img2,
+            );  
+        }
+    }
 
     builder.pop_stacking_context();
 

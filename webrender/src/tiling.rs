@@ -12,7 +12,7 @@ use internal_types::SourceTexture;
 use mask_cache::MaskCacheInfo;
 use prim_store::{CLIP_DATA_GPU_BLOCKS, DeferredResolve, ImagePrimitiveKind, PrimitiveCacheKey};
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
-//use profiler::FrameProfileCounters;
+use profiler::FrameProfileCounters;
 use render_task::{AlphaRenderItem, MaskGeometryKind, MaskSegment, RenderTask, RenderTaskData};
 use render_task::{RenderTaskId, RenderTaskIndex, RenderTaskKey, RenderTaskKind};
 use render_task::RenderTaskLocation;
@@ -1713,7 +1713,7 @@ pub struct Frame {
     pub device_pixel_ratio: f32,
     pub cache_size: DeviceUintSize,
     pub passes: Vec<RenderPass>,
-    //pub profile_counters: FrameProfileCounters,
+    pub profile_counters: FrameProfileCounters,
 
     pub layer_texture_data: Vec<PackedLayer>,
     pub render_task_data: Vec<RenderTaskData>,

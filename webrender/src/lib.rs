@@ -88,7 +88,7 @@ mod mask_cache;
 mod pipelines;
 mod prim_store;
 mod print_tree;
-//mod profiler;
+mod profiler;
 mod record;
 mod render_backend;
 mod render_task;

@@ -113,6 +113,7 @@ fn main() {
         debug: true,
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
+        enable_profiler: true,
         .. Default::default()
     };
 
