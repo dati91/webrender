@@ -183,11 +183,11 @@ impl DebugFontVertex {
 pub struct DebugColorVertex {
     pub x: f32,
     pub y: f32,
-    pub color: PackedColor,
+    pub color: ColorF,
 }
 
 impl DebugColorVertex {
-    pub fn new(x: f32, y: f32, color: PackedColor) -> DebugColorVertex {
+    pub fn new(x: f32, y: f32, color: ColorF) -> DebugColorVertex {
         DebugColorVertex {
             x: x,
             y: y,

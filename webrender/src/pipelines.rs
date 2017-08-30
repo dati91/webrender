@@ -15,6 +15,7 @@ use backend::Resources as R;
 use gfx::format::Format;
 use tiling::{BlurCommand, CacheClipInstance, PrimitiveInstance};
 use renderer::BlendMode;
+use internal_types::{DebugFontVertex, DebugColorVertex};
 
 const ALPHA: Blend = Blend {
     color: BlendChannel {
@@ -202,12 +203,31 @@ gfx_defines! {
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
+
+    vertex DebugInstances {
+        color: [f32; 4] = "aColor",
+        //pos: [f32; 4] = "aColorTexCoord",
+    }
+
+    pipeline debug {
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
+        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
+        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
+        vbuf: gfx::VertexBuffer<Position> = (),
+        ibuf: gfx::InstanceBuffer<DebugInstances> = (),
+        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+        out_color: gfx::RawRenderTarget = ("Target0",
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
+                                           gfx::state::MASK_ALL,
+                                           Some(ALPHA)),
+    }
 }
 
 type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
 type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
+type DebugPSO = gfx::PipelineState<R, debug::Meta>;
 
 impl Position {
     pub fn new(p: [f32; 2]) -> Position {
@@ -264,6 +284,18 @@ impl ClipInstances {
         self.data_index = instance.address;
         self.segment_index = instance.segment;
         self.resource_address = instance.resource_address;
+    }
+}
+
+impl DebugInstances {
+    pub fn new() -> DebugInstances {
+        DebugInstances {
+            color: [0.0; 4],
+        }
+    }
+
+    pub fn update(&mut self, instance: &DebugColorVertex) {
+        self.color = [instance.color.r, instance.color.g, instance.color.b, instance.color.a];
     }
 }
 
@@ -413,8 +445,38 @@ impl ClipProgram {
     }
 }
 
+pub struct DebugProgram {
+    pub data: debug::Data<R>,
+    pub pso: DebugPSO,
+    pub slice: gfx::Slice<R>,
+    pub upload: (gfx::handle::Buffer<R, DebugInstances>, usize),
+}
+
+impl DebugProgram {
+    pub fn new(data: debug::Data<R>,
+               pso: DebugPSO,
+               slice: gfx::Slice<R>,
+               upload: gfx::handle::Buffer<R, DebugInstances>)
+           -> DebugProgram {
+        DebugProgram {
+            data: data,
+            pso: pso,
+            slice: slice,
+            upload: (upload, 0),
+        }
+    }
+
+    pub fn get_pso(&self) -> &DebugPSO {
+        &self.pso
+    }
+
+    pub fn reset_upload_offset(&mut self) {
+        self.upload.1 = 0;
+    }
+}
+
 impl Device {
-    pub fn create_prim_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO) {
+    pub fn create_prim_psos(&mut self, vert_src: &[u8], frag_src: &[u8]) -> (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO) {
         let pso_depth_write = self.factory.create_pipeline_simple(
             vert_src,
             frag_src,
@@ -509,7 +571,7 @@ impl Device {
          pso_prem_alpha, pso_subpixel_depth_write, pso_subpixel)
     }
 
-    pub fn create_cache_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (CachePSO, CachePSO) {
+    pub fn create_cache_psos(&mut self, vert_src: &[u8], frag_src: &[u8]) -> (CachePSO, CachePSO) {
         let pso = self.factory.create_pipeline_simple(
             vert_src,
             frag_src,
@@ -532,7 +594,7 @@ impl Device {
         (pso, pso_alpha)
     }
 
-    pub fn create_clip_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (ClipPSO, ClipPSO, ClipPSO) {
+    pub fn create_clip_psos(&mut self, vert_src: &[u8], frag_src: &[u8]) -> (ClipPSO, ClipPSO, ClipPSO) {
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, clip::new()).unwrap();
 
         let pso_multiply = self.factory.create_pipeline_simple(
@@ -661,6 +723,34 @@ impl Device {
         ClipProgram::new(data, psos, self.slice.clone(), upload)
     }
 
+    pub fn create_debug_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugProgram {
+        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
+        {
+            let mut writer = self.factory.write_mapping(&upload).unwrap();
+            for i in 0..MAX_INSTANCE_COUNT {
+                writer[i] = DebugInstances::new();
+            }
+        }
+
+        let cache_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
+                                                         gfx::buffer::Role::Vertex,
+                                                         gfx::memory::Usage::Data,
+                                                         gfx::TRANSFER_DST).unwrap();
+
+        let data = debug::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: self.vertex_buffer.clone(),
+            ibuf: cache_instances,
+            color0: (self.color0.clone().view, self.color0.clone().sampler),
+            out_color: self.main_color.raw().clone(),
+            //out_depth: self.main_depth.clone(),
+        };
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug::new()).unwrap();
+        DebugProgram::new(data, pso, self.slice.clone(), upload)
+    }
+
     pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
         program.data.transform = proj.to_row_arrays();
 
@@ -695,5 +785,40 @@ impl Device {
 
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, blur_commands.len()).unwrap();
         self.encoder.draw(&program.slice, &program.pso, &program.data);
+    }
+
+    pub fn draw_debug(&mut self,
+                      program: &mut DebugProgram,
+                      proj: &Matrix4D<f32>,
+                      indices: &Vec<u32>,
+                      vertices: &Vec<DebugColorVertex>) {
+        program.data.transform = proj.to_row_arrays();
+
+        {
+            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
+            for (i, inst) in vertices.iter().enumerate() {
+                writer[i + program.upload.1].update(inst);
+            }
+        }
+
+
+        let quad_vertices: Vec<Position> = vertices.iter().map(|v| Position::new([v.x, v.y])).collect();
+
+        let (vbuf, slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, indices.as_slice());
+
+        {
+            program.data.vbuf = vbuf;
+            program.slice = slice;
+            program.slice.instances = Some((vertices.len() as u32, 0));
+        }
+
+        let locals = Locals {
+            transform: program.data.transform,
+            device_pixel_ratio: program.data.device_pixel_ratio,
+        };
+        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
+        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, vertices.len()).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(), &program.data);
+        program.upload.1 += vertices.len();
     }
 }

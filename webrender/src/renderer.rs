@@ -10,7 +10,7 @@
 //! [renderer]: struct.Renderer.html
 
 //use debug_colors;
-//use debug_render::DebugRenderer;
+use debug_render::DebugRenderer;
 use device::{Device, FrameId, TextureId, TextureFilter, TextureTarget, ShaderError};
 use device::{VECS_PER_DATA_16, VECS_PER_DATA_32, VECS_PER_DATA_64, VECS_PER_DATA_128};
 use device::{VECS_PER_LAYER, VECS_PER_PRIM_GEOM, VECS_PER_RENDER_TASK};
@@ -30,7 +30,7 @@ use profiler::{/*GpuProfileTag,*/ RendererProfileTimers, RendererProfileCounters
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::RenderTaskData;
-use pipelines::{BlurProgram, CacheProgram, ClipProgram, Program};
+use pipelines::{BlurProgram, CacheProgram, ClipProgram, DebugProgram, Program};
 use std;
 use std::boxed::Box;
 use std::cmp;
@@ -97,14 +97,14 @@ fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
 }
 
 #[cfg(not(feature = "dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+pub fn create_program(device: &mut Device, filename: &str) -> Program {
     let vs = get_shader_source(filename, ".vert");
     let ps = get_shader_source(filename, ".frag");
     device.create_program(vs.as_slice(), ps.as_slice())
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+pub fn create_program(device: &mut Device, filename: &str) -> Program {
     let vs = get_shader_source(filename, ".vert.fx");
     let ps = get_shader_source(filename, ".frag.fx");
     device.create_program(vs.as_slice(), ps.as_slice())
@@ -122,6 +122,20 @@ fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
     let vs = get_shader_source(filename, ".vert.fx");
     let ps = get_shader_source(filename, ".frag.fx");
     device.create_clip_program(vs.as_slice(), ps.as_slice())
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn create_debug_program(device: &mut Device, filename: &str) -> DebugProgram {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    device.create_debug_program(vs.as_slice(), ps.as_slice())
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn create_debug_program(device: &mut Device, filename: &str) -> DebugProgram {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    device.create_debug_program(vs.as_slice(), ps.as_slice())
 }
 
 struct ProgramPair((Program, Program));
@@ -510,7 +524,7 @@ pub enum ReadPixelsFormat {
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
     let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
                                            0.0, 1.0, 0.0, 0.0,
                                            0.0, 0.0, 0.5, 0.5,
@@ -519,7 +533,7 @@ fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
 }
 
 #[cfg(not(feature = "dx11"))]
-fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
     projection
 }
 
@@ -579,7 +593,7 @@ pub struct Renderer {
     clear_framebuffer: bool,
     clear_color: ColorF,
     enable_clear_scissor: bool,
-    //debug: DebugRenderer,
+    debug: DebugRenderer,
     render_target_debug: bool,
     enable_batcher: bool,
     backend_profile_counters: BackendProfileCounters,
@@ -808,6 +822,8 @@ impl Renderer {
 
         let gpu_cache_texture = CacheTexture::new(&mut device);
 
+        let debug_renderer = DebugRenderer::new(&mut device);
+
         //let gpu_profile = GpuProfiler::new(device.rc_gl());
 
         let renderer = Renderer {
@@ -841,7 +857,7 @@ impl Renderer {
             ps_split_composite: ps_split_composite,
             ps_composite: ps_composite,
             notifier: notifier,
-            //debug: debug_renderer,
+            debug: debug_renderer,
             render_target_debug: render_target_debug,
             enable_batcher: options.enable_batcher,
             backend_profile_counters: BackendProfileCounters::new(),
@@ -1069,7 +1085,7 @@ impl Renderer {
                                                &self.backend_profile_counters,
                                                &self.profile_counters,
                                                &mut profile_timers,
-                                               /*&mut self.debug*/);
+                                               &mut self.debug);
                 }
 
                 self.profile_counters.reset();
@@ -1077,7 +1093,7 @@ impl Renderer {
 
                 let debug_size = DeviceUintSize::new(framebuffer_size.width as u32,
                                                      framebuffer_size.height as u32);
-                //self.debug.render(&mut self.device, &debug_size);
+                self.debug.render(&mut self.device, &debug_size);
                 {
                     //let _gm = GpuMarker::new(self.device.rc_gl(), "end frame");
                     self.device.end_frame();
@@ -1811,9 +1827,9 @@ impl Renderer {
         self.unlock_external_images();
     }
 
-    /*pub fn debug_renderer<'a>(&'a mut self) -> &'a mut DebugRenderer {
+    pub fn debug_renderer<'a>(&'a mut self) -> &'a mut DebugRenderer {
         &mut self.debug
-    }*/
+    }
 
     pub fn get_profiler_enabled(&mut self) -> bool {
         self.enable_profiler

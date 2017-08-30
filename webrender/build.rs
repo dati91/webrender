@@ -89,9 +89,10 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
                           filename.starts_with("ps_angle_gradient") ||
                           filename.starts_with("ps_radial_gradient");
         let is_ps_yuv = filename.starts_with("ps_yuv");
-        // The shader must be primitive or clip (only one of them)
+        let is_debug = filename.starts_with("debug");
+        // The shader must be primitive or clip or debug (only one of them)
         // and it must be fragment or vertex shader (only one of them), else we skip it.
-        if !(is_prim ^ is_cache) || !(is_vert ^ is_frag) {
+        if !(is_prim ^ is_cache ^ is_debug) || !(is_vert ^ is_frag) {
             continue;
         }
 
@@ -156,7 +157,9 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
             shader_source.push_str(shader_prefix.as_str());
             shader_source.push_str(config_prefix);
             shader_source.push_str(&get_shader_source(&shared_src));
-            shader_source.push_str(&get_shader_source(&prim_shared_src));
+            if !is_debug {
+                shader_source.push_str(&get_shader_source(&prim_shared_src));                
+            }
             if is_clip_cache {
                 shader_source.push_str(&get_shader_source(&clip_shared_src));
             }
@@ -235,7 +238,7 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
             file_name_vector.push(file_name);
         }
     }
-    return file_name_vector;
+    file_name_vector
 }
 
 #[cfg(all(target_os = "windows", feature = "dx11"))]
@@ -243,7 +246,8 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
     for mut file_name in file_name_vector {
         let is_vert = file_name.ends_with(".vert");
         if  !(file_name.contains("ps_")
-            || file_name.contains("cs_clip_"))
+            || file_name.contains("cs_clip_")
+            || file_name.starts_with("debug_"))
             || file_name.contains("ps_clear") {
             continue;
         }
