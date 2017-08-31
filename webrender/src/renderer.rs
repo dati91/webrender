@@ -12,9 +12,6 @@
 //use debug_colors;
 use debug_render::DebugRenderer;
 use device::{Device, FrameId, TextureId, TextureFilter, TextureTarget, ShaderError};
-use device::{VECS_PER_DATA_16, VECS_PER_DATA_32, VECS_PER_DATA_64, VECS_PER_DATA_128};
-use device::{VECS_PER_LAYER, VECS_PER_PRIM_GEOM, VECS_PER_RENDER_TASK};
-use device::{VECS_PER_RESOURCE_RECTS, VECS_PER_GRADIENT_DATA, VECS_PER_SPLIT_GEOM};
 use device::RGBA_STRIDE;
 use euclid::Transform3D;
 use fnv::FnvHasher;
@@ -72,7 +69,16 @@ pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DITHER_ID: u32 = 4;
-
+pub const VECS_PER_DATA_16: usize = 1;
+pub const VECS_PER_DATA_32: usize = 2;
+pub const VECS_PER_DATA_64: usize = 4;
+pub const VECS_PER_DATA_128: usize = 8;
+pub const VECS_PER_GRADIENT_DATA: usize = 520;
+pub const VECS_PER_LAYER: usize = 9;
+pub const VECS_PER_PRIM_GEOM: usize = 2;
+pub const VECS_PER_RENDER_TASK: usize = 3;
+pub const VECS_PER_RESOURCE_RECTS: usize = 1;
+pub const VECS_PER_SPLIT_GEOM: usize = 3;
 
 impl ProgramPair {
     fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
@@ -1339,7 +1345,7 @@ impl Renderer {
             AlphaBatchKind::YuvImage(..) => {
                 for i in 0..batch.key.textures.colors.len() {
                     let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
-                    self.device.bind_yuv_texture(TextureSampler::color(i), texture_id);
+                    //self.device.bind_yuv_texture(TextureSampler::color(i), texture_id);
                 }
             },
             _ => {
@@ -1585,26 +1591,26 @@ impl Renderer {
             // in regions below.
             if !target.clip_batcher.border_clears.is_empty() {
                 println!("cs_clip_border, border_clears");
-                //self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.border_clears, &BlendMode::None, render_target.0);
+                self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.border_clears, &BlendMode::None, render_target.0);
             }
 
             // Draw any dots or dashes for border corners.
             if !target.clip_batcher.borders.is_empty() {
                 println!("cs_clip_border, borders");
-                //self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.borders, &BlendMode::Max, render_target.0);
+                self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.borders, &BlendMode::Max, render_target.0);
             }
 
             // switch to multiplicative blending
-            let blend_mode = BlendMode::Multiply;
+            let blend_mode = BlendMode::None;
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
                 println!("cs_clip_rectangle");
-                /*self.device.draw_clip(&mut self.cs_clip_rectangle,
+                self.device.draw_clip(&mut self.cs_clip_rectangle,
                                       projection,
                                       &target.clip_batcher.rectangles,
                                       &blend_mode,
-                                      render_target.0);*/
+                                      render_target.0);
             }
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
@@ -1612,7 +1618,7 @@ impl Renderer {
                 //self.device.bind_texture(TextureSampler::Color0, texture_id);
 
                 println!("cs_clip_image");
-                //self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode, render_target.0);
+                self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode, render_target.0);
             }
         }
     }
@@ -1790,7 +1796,7 @@ impl Renderer {
                                            *size,
                                            &projection);
                 }
-                //self.flush();
+                self.flush();
 
                 for (target_index, target) in pass.color_targets.targets.iter().enumerate() {
                     let render_target = pass.color_texture_id.map(|texture_id| {
@@ -1895,7 +1901,7 @@ impl Renderer {
         };
         assert_eq!(output.len(), stride * (rect.size.width * rect.size.height) as usize);
         self.device.flush();
-        self.device.read_pixels(rect, output);
+        //self.device.read_pixels(rect, output);
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
