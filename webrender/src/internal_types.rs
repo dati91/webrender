@@ -162,13 +162,13 @@ pub struct PackedVertex {
 pub struct DebugFontVertex {
     pub x: f32,
     pub y: f32,
-    pub color: PackedColor,
+    pub color: ColorF,
     pub u: f32,
     pub v: f32,
 }
 
 impl DebugFontVertex {
-    pub fn new(x: f32, y: f32, u: f32, v: f32, color: PackedColor) -> DebugFontVertex {
+    pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorF) -> DebugFontVertex {
         DebugFontVertex {
             x: x,
             y: y,

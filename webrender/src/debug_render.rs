@@ -5,48 +5,32 @@
 use debug_font_data;
 /*use device::{Device, GpuMarker, ProgramId, VAOId, TextureId, VertexFormat};
 use device::{TextureFilter, VertexUsageHint, TextureTarget};*/
-use device::{Device, TextureId, TextureFilter, TextureTarget};
+use device::{Device, TextureId, TextureFilter, TextureTarget, A_STRIDE};
 use euclid::{Transform3D, Point2D, Size2D, Rect};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, TextureSampler};
 use internal_types::{DebugFontVertex, DebugColorVertex, RenderTargetMode, PackedColor};
 use std::f32;
 use webrender_traits::{ColorF, ImageFormat, DeviceUintSize};
-use renderer::{create_debug_program, transform_projection, BlendMode};
-use pipelines::DebugProgram;
+use renderer::{create_debug_color_program, create_debug_font_program, transform_projection, BlendMode};
+use pipelines::{DebugColorProgram, DebugFontProgram};
 
 pub struct DebugRenderer {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
-    //font_program: DebugProgram,
-    //font_vao: VAOId,
+    font_program: DebugFontProgram,
     font_texture_id: TextureId,
-
     tri_vertices: Vec<DebugColorVertex>,
     tri_indices: Vec<u32>,
     line_vertices: Vec<DebugColorVertex>,
-    /*tri_vao: VAOId,
-    line_vao: VAOId,*/
-    color_program: DebugProgram,
+    color_program: DebugColorProgram,
 }
 
 impl DebugRenderer {
     pub fn new(device: &mut Device) -> DebugRenderer {
-        //let font_program = create_debug_program(device, "debug_font");
-        let color_program = create_debug_program(device, "debug_color");
-
-        /*let font_vao = device.create_vao(VertexFormat::DebugFont, 32);
-        let line_vao = device.create_vao(VertexFormat::DebugColor, 32);
-        let tri_vao = device.create_vao(VertexFormat::DebugColor, 32);*/
-
+        let font_program = create_debug_font_program(device, "debug_font");
+        let color_program = create_debug_color_program(device, "debug_color");
         let font_texture_id = device.create_empty_texture(debug_font_data::BMP_WIDTH, debug_font_data::BMP_HEIGHT, TextureFilter::Linear, TextureTarget::Default);
-        //TODO use the width and height data
-        /*device.init_texture(font_texture_id,
-                            debug_font_data::BMP_WIDTH,
-                            debug_font_data::BMP_HEIGHT,
-                            ImageFormat::A8,
-                            TextureFilter::Linear,
-                            RenderTargetMode::None,
-                            Some(&debug_font_data::FONT_BITMAP));*/
+        device.update_texture(font_texture_id, 0, 0, debug_font_data::BMP_WIDTH, debug_font_data::BMP_HEIGHT,  ImageFormat::A8, None, Some(&debug_font_data::FONT_BITMAP));
 
         DebugRenderer {
             font_vertices: Vec::new(),
@@ -55,11 +39,8 @@ impl DebugRenderer {
             tri_vertices: Vec::new(),
             tri_indices: Vec::new(),
             line_vertices: Vec::new(),
-            //font_program: font_program,
+            font_program: font_program,
             color_program: color_program,
-            /*tri_vao: tri_vao,
-            font_vao: font_vao,
-            line_vao: line_vao,*/
         }
     }
 
@@ -75,7 +56,6 @@ impl DebugRenderer {
         let mut x_start = x;
         let ipw = 1.0 / debug_font_data::BMP_WIDTH as f32;
         let iph = 1.0 / debug_font_data::BMP_HEIGHT as f32;
-        let color = PackedColor::from_color(color);
 
         let mut min_x = f32::MAX;
         let mut max_x = -f32::MAX;
@@ -102,10 +82,10 @@ impl DebugRenderer {
 
                 let vertex_count = self.font_vertices.len() as u32;
 
-                self.font_vertices.push(DebugFontVertex::new(x0, y0, s0, t0, color));
-                self.font_vertices.push(DebugFontVertex::new(x1, y0, s1, t0, color));
-                self.font_vertices.push(DebugFontVertex::new(x0, y1, s0, t1, color));
-                self.font_vertices.push(DebugFontVertex::new(x1, y1, s1, t1, color));
+                self.font_vertices.push(DebugFontVertex::new(x0, y0, s0, t0, color.clone()));
+                self.font_vertices.push(DebugFontVertex::new(x1, y0, s1, t0, color.clone()));
+                self.font_vertices.push(DebugFontVertex::new(x0, y1, s0, t1, color.clone()));
+                self.font_vertices.push(DebugFontVertex::new(x1, y1, s1, t1, color.clone()));
 
                 self.font_indices.push(vertex_count + 0);
                 self.font_indices.push(vertex_count + 1);
@@ -131,8 +111,6 @@ impl DebugRenderer {
                     y1: f32,
                     color_top: &ColorF,
                     color_bottom: &ColorF) {
-        /*let color_top = PackedColor::from_color(color_top);
-        let color_bottom = PackedColor::from_color(color_bottom);*/
         let vertex_count = self.tri_vertices.len() as u32;
 
         self.tri_vertices.push(DebugColorVertex::new(x0, y0, color_top.clone()));
@@ -156,8 +134,6 @@ impl DebugRenderer {
                     x1: i32,
                     y1: i32,
                     color1: &ColorF) {
-        /*let color0 = PackedColor::from_color(color0);
-        let color1 = PackedColor::from_color(color1);*/
         self.line_vertices.push(DebugColorVertex::new(x0 as f32, y0 as f32, color0.clone()));
         self.line_vertices.push(DebugColorVertex::new(x1 as f32, y1 as f32, color1.clone()));
     }
@@ -166,10 +142,6 @@ impl DebugRenderer {
                   device: &mut Device,
                   viewport_size: &DeviceUintSize) {
         //let _gm = GpuMarker::new(device.rc_gl(), "debug");
-        /*device.disable_depth();
-        device.set_blend(true);
-        device.set_blend_mode_alpha();*/
-
         let projection = {
             let projection = Transform3D::ortho(0.0,
                                                 viewport_size.width as f32,
@@ -182,18 +154,7 @@ impl DebugRenderer {
 
         // Triangles
         if !self.tri_vertices.is_empty() {
-            println!("Drawing triangle vertices");
-            device.draw_debug(&mut self.color_program, &projection, &self.tri_indices, &self.tri_vertices);
-            device.flush();
-            /*device.bind_program(self.color_program_id, &projection);
-            device.bind_vao(self.tri_vao);
-            device.update_vao_indices(self.tri_vao,
-                                      &self.tri_indices,
-                                      VertexUsageHint::Dynamic);
-            device.update_vao_main_vertices(self.tri_vao,
-                                            &self.tri_vertices,
-                                            VertexUsageHint::Dynamic);
-            device.draw_triangles_u32(0, self.tri_indices.len() as i32);*/
+            device.draw_debug_color(&mut self.color_program, &projection, &self.tri_indices, &self.tri_vertices);
         }
 
         // Lines
@@ -208,25 +169,16 @@ impl DebugRenderer {
         }*/
 
         // Glyph
-        /*if !self.font_indices.is_empty() {
+        if !self.font_indices.is_empty() {
             device.bind_texture(TextureSampler::Color0, self.font_texture_id);
-            device.draw_debug(&mut self.font_program, &projection, &[], &BlendMode::Alpha, false);
-            /*device.bind_program(self.font_program_id, &projection);
-            device.bind_vao(self.font_vao);
-            device.update_vao_indices(self.font_vao,
-                                      &self.font_indices,
-                                      VertexUsageHint::Dynamic);
-            device.update_vao_main_vertices(self.font_vao,
-                                            &self.font_vertices,
-                                            VertexUsageHint::Dynamic);
-            device.draw_triangles_u32(0, self.font_indices.len() as i32);*/
-        }*/
+            device.draw_debug_font(&mut self.font_program, &projection, &self.font_indices, &self.font_vertices);
+        }
 
+        device.flush();
         self.font_indices.clear();
         self.font_vertices.clear();
         self.line_vertices.clear();
         self.tri_vertices.clear();
         self.tri_indices.clear();
-        self.color_program.reset_upload_offset();
     }
 }

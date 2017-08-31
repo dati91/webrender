@@ -295,7 +295,7 @@ impl TextureId {
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
 pub struct TextureId {
-    name: u32,
+    pub name: u32,
 }
 
 /*#[derive(Debug)]
@@ -460,7 +460,7 @@ impl Device {
         self.max_texture_size
     }
 
-    fn generate_texture_id(&mut self) -> TextureId {
+    pub fn generate_texture_id(&mut self) -> TextureId {
         use rand::OsRng;
 
         let mut rng = OsRng::new().unwrap();
@@ -734,7 +734,7 @@ impl Device {
         }
     }*/
 
-    fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
+    pub fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
         let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
         for s in 0..orig_stride {
             for h in 0..height {

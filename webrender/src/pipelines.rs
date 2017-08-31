@@ -201,20 +201,35 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        //out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 
-    vertex DebugInstances {
+    vertex DebugColorVertices {
+        pos: [f32; 2] = "aPosition",
         color: [f32; 4] = "aColor",
-        //pos: [f32; 4] = "aColorTexCoord",
     }
 
-    pipeline debug {
+    pipeline debug_color {
         locals: gfx::ConstantBuffer<Locals> = "Locals",
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
-        vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<DebugInstances> = (),
+        vbuf: gfx::VertexBuffer<DebugColorVertices> = (),
+        out_color: gfx::RawRenderTarget = ("Target0",
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
+                                           gfx::state::MASK_ALL,
+                                           Some(ALPHA)),
+    }
+
+    vertex DebugFontVertices {
+        pos: [f32; 2] = "aPosition",
+        color: [f32; 4] = "aColor",
+        tex_coord: [f32; 2] = "aColorTexCoord",
+    }
+
+    pipeline debug_font {
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
+        transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
+        device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
+        vbuf: gfx::VertexBuffer<DebugFontVertices> = (),
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         out_color: gfx::RawRenderTarget = ("Target0",
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
@@ -227,12 +242,32 @@ type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
 type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
-type DebugPSO = gfx::PipelineState<R, debug::Meta>;
+type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
+type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;
 
 impl Position {
     pub fn new(p: [f32; 2]) -> Position {
         Position {
             pos: [p[0], p[1], 0.0],
+        }
+    }
+}
+
+impl DebugColorVertices {
+    pub fn new(pos: [f32; 2], color: [f32; 4]) -> DebugColorVertices {
+        DebugColorVertices {
+            pos: pos,
+            color: color,
+        }
+    }
+}
+
+impl DebugFontVertices {
+    pub fn new(pos: [f32; 2], color: [f32; 4], tex_coord: [f32; 2]) -> DebugFontVertices {
+        DebugFontVertices {
+            pos: pos,
+            color: color,
+            tex_coord: tex_coord,
         }
     }
 }
@@ -284,18 +319,6 @@ impl ClipInstances {
         self.data_index = instance.address;
         self.segment_index = instance.segment;
         self.resource_address = instance.resource_address;
-    }
-}
-
-impl DebugInstances {
-    pub fn new() -> DebugInstances {
-        DebugInstances {
-            color: [0.0; 4],
-        }
-    }
-
-    pub fn update(&mut self, instance: &DebugColorVertex) {
-        self.color = [instance.color.r, instance.color.g, instance.color.b, instance.color.a];
     }
 }
 
@@ -445,33 +468,49 @@ impl ClipProgram {
     }
 }
 
-pub struct DebugProgram {
-    pub data: debug::Data<R>,
-    pub pso: DebugPSO,
+pub struct DebugColorProgram {
+    pub data: debug_color::Data<R>,
+    pub pso: DebugColorPSO,
     pub slice: gfx::Slice<R>,
-    pub upload: (gfx::handle::Buffer<R, DebugInstances>, usize),
 }
 
-impl DebugProgram {
-    pub fn new(data: debug::Data<R>,
-               pso: DebugPSO,
-               slice: gfx::Slice<R>,
-               upload: gfx::handle::Buffer<R, DebugInstances>)
-           -> DebugProgram {
-        DebugProgram {
+impl DebugColorProgram {
+    pub fn new(data: debug_color::Data<R>,
+               pso: DebugColorPSO,
+               slice: gfx::Slice<R>)
+           -> DebugColorProgram {
+        DebugColorProgram {
             data: data,
             pso: pso,
             slice: slice,
-            upload: (upload, 0),
         }
     }
 
-    pub fn get_pso(&self) -> &DebugPSO {
+    pub fn get_pso(&self) -> &DebugColorPSO {
         &self.pso
     }
+}
 
-    pub fn reset_upload_offset(&mut self) {
-        self.upload.1 = 0;
+pub struct DebugFontProgram {
+    pub data: debug_font::Data<R>,
+    pub pso: DebugFontPSO,
+    pub slice: gfx::Slice<R>,
+}
+
+impl DebugFontProgram {
+    pub fn new(data: debug_font::Data<R>,
+               pso: DebugFontPSO,
+               slice: gfx::Slice<R>)
+           -> DebugFontProgram {
+        DebugFontProgram {
+            data: data,
+            pso: pso,
+            slice: slice,
+        }
+    }
+
+    pub fn get_pso(&self) -> &DebugFontPSO {
+        &self.pso
     }
 }
 
@@ -723,32 +762,39 @@ impl Device {
         ClipProgram::new(data, psos, self.slice.clone(), upload)
     }
 
-    pub fn create_debug_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = DebugInstances::new();
-            }
-        }
+    pub fn create_debug_color_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugColorProgram {
+        // Creating a dummy vertexbuffer here. This is replaced in the draw_debug_color call.
+        let quad_indices: &[u16] = &[0];
+        let quad_vertices = [DebugColorVertices::new([0.0, 0.0], [0.0, 0.0, 0.0, 0.0])];
+        let (vertex_buffer, mut slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
 
-        let cache_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                         gfx::buffer::Role::Vertex,
-                                                         gfx::memory::Usage::Data,
-                                                         gfx::TRANSFER_DST).unwrap();
-
-        let data = debug::Data {
+        let data = debug_color::Data {
             locals: self.factory.create_constant_buffer(1),
             transform: [[0f32; 4]; 4],
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: cache_instances,
+            vbuf: vertex_buffer,
+            out_color: self.main_color.raw().clone(),
+        };
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_color::new()).unwrap();
+        DebugColorProgram::new(data, pso, self.slice.clone())
+    }
+
+    pub fn create_debug_font_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugFontProgram {
+        // Creating a dummy vertexbuffer here. This is replaced in the draw_debug_font call.
+        let quad_indices: &[u16] = &[ 0,];
+        let quad_vertices = [DebugFontVertices::new([0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0])];
+        let (vertex_buffer, mut slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+
+        let data = debug_font::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: vertex_buffer,
             color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
             out_color: self.main_color.raw().clone(),
-            //out_depth: self.main_depth.clone(),
         };
-        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug::new()).unwrap();
-        DebugProgram::new(data, pso, self.slice.clone(), upload)
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_font::new()).unwrap();
+        DebugFontProgram::new(data, pso, slice)
     }
 
     pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
@@ -787,29 +833,19 @@ impl Device {
         self.encoder.draw(&program.slice, &program.pso, &program.data);
     }
 
-    pub fn draw_debug(&mut self,
-                      program: &mut DebugProgram,
-                      proj: &Matrix4D<f32>,
-                      indices: &Vec<u32>,
-                      vertices: &Vec<DebugColorVertex>) {
+    pub fn draw_debug_color(&mut self,
+                            program: &mut DebugColorProgram,
+                            proj: &Matrix4D<f32>,
+                            indices: &Vec<u32>,
+                            vertices: &Vec<DebugColorVertex>) {
         program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
-            for (i, inst) in vertices.iter().enumerate() {
-                writer[i + program.upload.1].update(inst);
-            }
-        }
-
-
-        let quad_vertices: Vec<Position> = vertices.iter().map(|v| Position::new([v.x, v.y])).collect();
+        let quad_vertices: Vec<DebugColorVertices> = vertices.iter().map(|v| DebugColorVertices::new([v.x, v.y], v.color.to_array())).collect();
 
         let (vbuf, slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, indices.as_slice());
 
         {
             program.data.vbuf = vbuf;
             program.slice = slice;
-            program.slice.instances = Some((vertices.len() as u32, 0));
         }
 
         let locals = Locals {
@@ -817,8 +853,34 @@ impl Device {
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
-        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, vertices.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(), &program.data);
-        program.upload.1 += vertices.len();
+    }
+
+    pub fn draw_debug_font(&mut self,
+                            program: &mut DebugFontProgram,
+                            proj: &Matrix4D<f32>,
+                            indices: &Vec<u32>,
+                            vertices: &Vec<DebugFontVertex>) {
+        program.data.transform = proj.to_row_arrays();
+        let quad_vertices: Vec<DebugFontVertices> = vertices.iter().map(|v| DebugFontVertices::new([v.x, v.y], v.color.to_array(),[v.u, v.v])).collect();
+
+        let (vbuf, slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, indices.as_slice());
+
+        {
+            program.data.vbuf = vbuf;
+            program.slice = slice;
+        }
+
+        if !self.color0_tex_id.is_skipable() {
+            println!("set c0");
+            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+
+        let locals = Locals {
+            transform: program.data.transform,
+            device_pixel_ratio: program.data.device_pixel_ratio,
+        };
+        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(), &program.data);
     }
 }
