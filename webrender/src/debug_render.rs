@@ -38,7 +38,7 @@ impl DebugRenderer {
         let line_vao = device.create_vao(VertexFormat::DebugColor, 32);
         let tri_vao = device.create_vao(VertexFormat::DebugColor, 32);*/
 
-        let font_texture_id = device.create_texture_id(TextureTarget::Default, ImageFormat::A8);
+        let font_texture_id = device.create_empty_texture(debug_font_data::BMP_WIDTH, debug_font_data::BMP_HEIGHT, TextureFilter::Linear, TextureTarget::Default);
         //TODO use the width and height data
         /*device.init_texture(font_texture_id,
                             debug_font_data::BMP_WIDTH,
@@ -184,6 +184,7 @@ impl DebugRenderer {
         if !self.tri_vertices.is_empty() {
             println!("Drawing triangle vertices");
             device.draw_debug(&mut self.color_program, &projection, &self.tri_indices, &self.tri_vertices);
+            device.flush();
             /*device.bind_program(self.color_program_id, &projection);
             device.bind_vao(self.tri_vao);
             device.update_vao_indices(self.tri_vao,

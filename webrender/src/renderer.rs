@@ -763,7 +763,7 @@ impl Renderer {
                                        };
 
         if let Some(id) = dither_matrix_texture_id {
-           device.bind_texture(TextureSampler::Dither, id);
+           //device.bind_texture(TextureSampler::Dither, id);
         }
 
         let gpu_data_textures = GpuDataTextures::new();
@@ -1183,7 +1183,7 @@ impl Renderer {
                         if self.cache_texture_id_map.len() == cache_texture_index {
                             // Create a new native texture, as requested by the texture cache.
                             let texture_id = self.device
-                                                 .create_texture_id(TextureTarget::Default, format);
+                                                 .create_empty_texture(width, height, filter, TextureTarget::Default);
                             self.cache_texture_id_map.push(texture_id);
                         }
                         let texture_id = self.cache_texture_id_map[cache_texture_index];
@@ -1191,13 +1191,14 @@ impl Renderer {
                         if let Some(image) = data {
                             match image {
                                 ImageData::Raw(raw) => {
-                                    self.device.init_texture(texture_id,
-                                                             width,
-                                                             height,
-                                                             format,
-                                                             filter,
-                                                             mode,
-                                                             Some(raw.as_slice()));
+                                    self.device.update_texture(texture_id,
+                                                               0,
+                                                               0,
+                                                               width,
+                                                               height,
+                                                               format,
+                                                               None,
+                                                               Some(raw.as_slice()));
                                 }
                                 ImageData::External(ext_image) => {
                                     match ext_image.image_type {
@@ -1208,13 +1209,14 @@ impl Renderer {
 
                                             match handler.lock(ext_image.id, ext_image.channel_index).source {
                                                 ExternalImageSource::RawData(raw) => {
-                                                    self.device.init_texture(texture_id,
-                                                                             width,
-                                                                             height,
-                                                                             format,
-                                                                             filter,
-                                                                             mode,
-                                                                             Some(raw));
+                                                    self.device.update_texture(texture_id,
+                                                                               0,
+                                                                               0,
+                                                                               width,
+                                                                               height,
+                                                                               format,
+                                                                               None,
+                                                                               Some(raw));
                                                 }
                                                 _ => panic!("No external buffer found"),
                                             };
@@ -1231,7 +1233,7 @@ impl Renderer {
                                     panic!("No suitable image buffer for TextureUpdateOp::Create.");
                                 }
                             }
-                        } else {
+                        } /*else {
                             self.device.init_texture(texture_id,
                                                      width,
                                                      height,
@@ -1239,7 +1241,7 @@ impl Renderer {
                                                      filter,
                                                      mode,
                                                      None);
-                        }
+                        }*/
                     }
                     TextureUpdateOp::Grow { width, height, format, filter, mode } => {
                         let texture_id = self.cache_texture_id_map[update.id.0];
@@ -1250,15 +1252,15 @@ impl Renderer {
                                                    filter,
                                                    mode);
                     }
-                    TextureUpdateOp::Update { page_pos_x, page_pos_y, width, height, data, stride, offset } => {
+                    TextureUpdateOp::Update { page_pos_x, page_pos_y, width, height, format, data, stride, offset } => {
                         let texture_id = self.cache_texture_id_map[update.id.0];
                         self.device.update_texture(texture_id,
                                                    page_pos_x,
                                                    page_pos_y,
-                                                   width, height, stride,
-                                                   &data[offset as usize..]);
+                                                   width, height, format, stride,
+                                                   Some(&data[offset as usize..]));
                     }
-                    TextureUpdateOp::UpdateForExternalBuffer { rect, id, channel_index, stride, offset } => {
+                    TextureUpdateOp::UpdateForExternalBuffer { rect, id, channel_index, format, stride, offset } => {
                         let handler = self.external_image_handler
                                           .as_mut()
                                           .expect("Found external image, but no handler set!");
@@ -1272,8 +1274,9 @@ impl Renderer {
                                                       rect.origin.y,
                                                       rect.size.width,
                                                       rect.size.height,
+                                                      format,
                                                       stride,
-                                                      &data[offset as usize..]);
+                                                      Some(&data[offset as usize..]));
                             }
                             _ => panic!("No external buffer found"),
                         };
@@ -1330,6 +1333,7 @@ impl Renderer {
                     render_target: Option<(TextureId, i32)>,
                     target_dimensions: DeviceUintSize,
                     enable_depth_write: bool) {
+        println!("submit_batch render_target={:?}", render_target);
         let transform_kind = batch.key.flags.transform_kind();
         let needs_clipping = batch.key.flags.needs_clipping();
         debug_assert!(!needs_clipping ||
@@ -1342,12 +1346,12 @@ impl Renderer {
                           BlendMode::None => false,
                       });
         match batch.key.kind {
-            AlphaBatchKind::YuvImage(..) => {
+            /*AlphaBatchKind::YuvImage(..) => {
                 for i in 0..batch.key.textures.colors.len() {
                     let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
                     //self.device.bind_yuv_texture(TextureSampler::color(i), texture_id);
                 }
-            },
+            },*/
             _ => {
                 for i in 0..batch.key.textures.colors.len() {
                     let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
@@ -1682,50 +1686,53 @@ impl Renderer {
     fn start_frame(&mut self, frame: &mut Frame) {
         //let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_DATA);
 
-        // Assign render targets to the passes.
         for pass in &mut frame.passes {
             debug_assert!(pass.color_texture_id.is_none());
             debug_assert!(pass.alpha_texture_id.is_none());
 
+            let (width, height) = (frame.cache_size.width as u32, frame.cache_size.height as u32);
             if pass.needs_render_target_kind(RenderTargetKind::Color) {
-                pass.color_texture_id = Some(self.color_render_targets
-                                                 .pop()
-                                                 .unwrap_or_else(|| {
-                                                     self.device.create_texture_id(TextureTarget::Default, ImageFormat::BGRA8)
-                                                  }));
+                let texture_id = self.color_render_targets
+                                     .pop()
+                                     .unwrap_or_else(|| {
+                                         self.device.create_empty_texture(width,
+                                                                          height,
+                                                                          TextureFilter::Linear,
+                                                                          TextureTarget::Default)
+                                     });
+                pass.color_texture_id = Some(texture_id);
+                let target_count = pass.required_target_count(RenderTargetKind::Color);
+                self.device.update_texture(texture_id,
+                                           0,
+                                           0,
+                                           width,
+                                           height,
+                                           ImageFormat::BGRA8,
+                                           //RenderTargetMode::LayerRenderTarget(target_count as i32),
+                                           None,
+                                           None);
             }
 
             if pass.needs_render_target_kind(RenderTargetKind::Alpha) {
-                pass.alpha_texture_id = Some(self.alpha_render_targets
-                                                 .pop()
-                                                 .unwrap_or_else(|| {
-                                                     self.device.create_texture_id(TextureTarget::Default, ImageFormat::A8)
-                                                  }));
-            }
-        }
-
-
-        // Init textures and render targets to match this scene.
-        for pass in &frame.passes {
-            if let Some(texture_id) = pass.color_texture_id {
-                let target_count = pass.required_target_count(RenderTargetKind::Color);
-                self.device.init_texture(texture_id,
-                                         frame.cache_size.width as u32,
-                                         frame.cache_size.height as u32,
-                                         ImageFormat::BGRA8,
-                                         TextureFilter::Linear,
-                                         RenderTargetMode::LayerRenderTarget(target_count as i32),
-                                         None);
-            }
-            if let Some(texture_id) = pass.alpha_texture_id {
+                let texture_id = self.alpha_render_targets
+                                     .pop()
+                                     .unwrap_or_else(|| {
+                                         self.device.create_empty_texture(width,
+                                                                          height,
+                                                                          TextureFilter::Linear,
+                                                                          TextureTarget::Default)
+                                     });
+                pass.alpha_texture_id = Some(texture_id);
                 let target_count = pass.required_target_count(RenderTargetKind::Alpha);
-                self.device.init_texture(texture_id,
-                                         frame.cache_size.width as u32,
-                                         frame.cache_size.height as u32,
-                                         ImageFormat::A8,
-                                         TextureFilter::Nearest,
-                                         RenderTargetMode::LayerRenderTarget(target_count as i32),
-                                         None);
+                self.device.update_texture(texture_id,
+                                           0,
+                                           0,
+                                           width,
+                                           height,
+                                           ImageFormat::A8,
+                                           //RenderTargetMode::LayerRenderTarget(target_count as i32),
+                                           None,
+                                           None);
             }
         }
 
@@ -1759,7 +1766,7 @@ impl Renderer {
                 let size;
                 let clear_color;
                 let projection;
-
+                println!("pass.is_framebuffer={:?}",pass.is_framebuffer);
                 if pass.is_framebuffer {
                     clear_color = if self.clear_framebuffer || needs_clear {
                         Some(frame.background_color.map_or(self.clear_color.to_array(), |color| {
@@ -1774,19 +1781,21 @@ impl Renderer {
                                                  size.height as f32,
                                                  0.0,
                                                  ORTHO_NEAR_PLANE,
-                                                 ORTHO_FAR_PLANE)
+                                                 ORTHO_FAR_PLANE);
                 } else {
                     size = &frame.cache_size;
                     clear_color = Some([0.0, 0.0, 0.0, 0.0]);
                     projection = Transform3D::ortho(0.0,
                                                  size.width as f32,
-                                                 0.0,
                                                  size.height as f32,
+                                                 0.0,
                                                  ORTHO_NEAR_PLANE,
                                                  ORTHO_FAR_PLANE);
                 }
-
-                let projection = transform_projection(projection);
+                //let p1 = Transform3D::from_array(projection.to_column_major_array());
+                //let projection = transform_projection(projection);
+                //println!("proj={:?} p2={:?} p2={:?}", projection, p1, p2);
+                println!("bind cache samplers");
                 self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
                 self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
 
@@ -1794,7 +1803,7 @@ impl Renderer {
                     self.draw_alpha_target((pass.alpha_texture_id.unwrap(), target_index as i32),
                                            target,
                                            *size,
-                                           &projection);
+                                           &Transform3D::from_array(projection.to_column_major_array()));
                 }
                 self.flush();
 
