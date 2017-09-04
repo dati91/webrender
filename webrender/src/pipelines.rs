@@ -201,7 +201,7 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+        //out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 
     vertex DebugInstances {
@@ -717,7 +717,7 @@ impl Device {
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
             out_color: self.dummy_tex.rtv.raw().clone(),
-            out_depth: self.dummy_tex.dsv.clone(),
+            //out_depth: self.dummy_tex.dsv.clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)

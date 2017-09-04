@@ -543,6 +543,20 @@ pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
     projection
 }
 
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn alpha_transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
+                                           0.0,-1.0, 0.0, 0.0,
+                                           0.0, 0.0, 1.0, 1.0,
+                                           0.0, 0.0, 0.0, 1.0);
+    transform.post_mul(&Transform3D::from_array(projection.to_column_major_array()))
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn alpha_transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    projection
+}
+
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
 pub struct Renderer {
@@ -1698,7 +1712,7 @@ impl Renderer {
                                          self.device.create_empty_texture(width,
                                                                           height,
                                                                           TextureFilter::Linear,
-                                                                          TextureTarget::Default)
+                                                                          TextureTarget::Array)
                                      });
                 pass.color_texture_id = Some(texture_id);
                 let target_count = pass.required_target_count(RenderTargetKind::Color);
@@ -1720,7 +1734,7 @@ impl Renderer {
                                          self.device.create_empty_texture(width,
                                                                           height,
                                                                           TextureFilter::Linear,
-                                                                          TextureTarget::Default)
+                                                                          TextureTarget::Array)
                                      });
                 pass.alpha_texture_id = Some(texture_id);
                 let target_count = pass.required_target_count(RenderTargetKind::Alpha);
@@ -1787,13 +1801,13 @@ impl Renderer {
                     clear_color = Some([0.0, 0.0, 0.0, 0.0]);
                     projection = Transform3D::ortho(0.0,
                                                  size.width as f32,
-                                                 size.height as f32,
                                                  0.0,
+                                                 size.height as f32,
                                                  ORTHO_NEAR_PLANE,
                                                  ORTHO_FAR_PLANE);
                 }
                 //let p1 = Transform3D::from_array(projection.to_column_major_array());
-                //let projection = transform_projection(projection);
+                let alpha_projection = alpha_transform_projection(projection);
                 //println!("proj={:?} p2={:?} p2={:?}", projection, p1, p2);
                 println!("bind cache samplers");
                 self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
@@ -1803,10 +1817,11 @@ impl Renderer {
                     self.draw_alpha_target((pass.alpha_texture_id.unwrap(), target_index as i32),
                                            target,
                                            *size,
-                                           &Transform3D::from_array(projection.to_column_major_array()));
+                                           //&Transform3D::from_array(projection.to_column_major_array()));
+                                           &alpha_projection);
                 }
                 self.flush();
-
+                let projection = transform_projection(projection);
                 for (target_index, target) in pass.color_targets.targets.iter().enumerate() {
                     let render_target = pass.color_texture_id.map(|texture_id| {
                         (texture_id, target_index as i32)
@@ -1818,7 +1833,7 @@ impl Renderer {
                                            clear_color,
                                            &frame.render_task_data,
                                            &projection);
-
+                    self.flush();
                 }
                 //self.flush();
 

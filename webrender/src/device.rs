@@ -83,7 +83,7 @@ pub struct Texture<R, T> where R: gfx::Resources,
     pub handle: gfx::handle::Texture<R, T::Surface>,
     pub rtv: gfx::handle::RenderTargetView<R, T>,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
-    pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
+    //pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
 }
 
 impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat + gfx::format::TextureFormat {
@@ -121,12 +121,12 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat +
         //let dsv_cty = gfx::format::ChannelType::Unorm;
         //let tex_dsv = try!(factory.create_texture(tex_kind, 1, gfx::memory::SHADER_RESOURCE | gfx::memory::DEPTH_STENCIL, gfx::memory::Usage::Data, Some(dsv_cty)));
         //let dsv = try!(factory.view_texture_as_depth_stencil_trivial(&tex_dsv));
-        let dsv = try!(factory.create_depth_stencil_view_only(width, height));
+        //let dsv = try!(factory.create_depth_stencil_view_only(width, height));
         Ok(Texture {
             handle: tex,
             rtv: rtv,
             srv: srv,
-            dsv: dsv,
+            //dsv: dsv,
         })
     }
 
@@ -774,20 +774,25 @@ impl Device {
             transform: program.data.transform,
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
-        if !self.color0_tex_id.is_skipable() {
-            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color1_tex_id.is_skipable() {
-            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color2_tex_id.is_skipable() {
-            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
         if !self.cache_a8_tex_id.is_skipable() {
+            println!("set a8");
             program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
         }
         if !self.cache_rgba8_tex_id.is_skipable() {
+            println!("set rgba8");
             program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color0_tex_id.is_skipable() {
+            println!("set c0");
+            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color1_tex_id.is_skipable() {
+            println!("set c1");
+            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color2_tex_id.is_skipable() {
+            println!("set c2");
+            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
         }
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
@@ -804,7 +809,7 @@ impl Device {
         println!("draw_clip render_target={:?}", texture_id);
         program.data.transform = proj.to_row_arrays();
         program.data.out_color = self.textures.get(&texture_id).unwrap().rtv.raw().clone();
-        program.data.out_depth = self.textures.get(&texture_id).unwrap().dsv.clone();
+        //program.data.out_depth = self.textures.get(&texture_id).unwrap().dsv.clone();
         {
             let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
             for (i, inst) in instances.iter().enumerate() {
@@ -820,20 +825,25 @@ impl Device {
             transform: program.data.transform,
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
-        if !self.color0_tex_id.is_skipable() {
-            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color1_tex_id.is_skipable() {
-            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color2_tex_id.is_skipable() {
-            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
         if !self.cache_a8_tex_id.is_skipable() {
+            println!("set a8");
             program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
         }
         if !self.cache_rgba8_tex_id.is_skipable() {
+            println!("set rgba8");
             program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color0_tex_id.is_skipable() {
+            println!("set c0");
+            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color1_tex_id.is_skipable() {
+            println!("set c1");
+            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color2_tex_id.is_skipable() {
+            println!("set c2");
+            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
         }
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
