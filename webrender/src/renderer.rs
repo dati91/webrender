@@ -1592,11 +1592,11 @@ impl Renderer {
             // GPUs that I have tested with. It's possible it may be a
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
-            // let clear_color = [1.0, 1.0, 1.0, 0.0];
-            // self.device.clear_target_rect(Some(clear_color),
-            //                               None,
-            //                               target.used_rect());
-            // self.device.clear_target(Some(clear_color), Some(1.0));
+            let clear_color = [1.0, 0.0, 0.0, 0.0];
+            /*self.device.clear_target_rect(Some(clear_color),
+                                          None,
+                                          target.used_rect());*/
+            self.device.clear_render_target(render_target.0, clear_color);
         }
 
         // Draw the clip items into the tiled alpha mask.
@@ -1619,7 +1619,7 @@ impl Renderer {
             }
 
             // switch to multiplicative blending
-            let blend_mode = BlendMode::None;
+            let blend_mode = BlendMode::Multiply;
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {

@@ -468,6 +468,8 @@ impl Device {
                                 target: TextureTarget) -> TextureId {
         let texture_id = self.generate_texture_id();
         println!("create_empty_texture texture_id={:?}", texture_id);
+        println!("texture_id={:?} width={:?} height={:?} _filter={:?} target={:?}",
+                  texture_id, width, height, _filter, target);
         assert!(!self.textures.contains_key(&texture_id));
         let tex = Texture::empty(&mut self.factory, [width as usize, height as usize], target).unwrap();
         self.textures.insert(texture_id, tex);
@@ -704,6 +706,11 @@ impl Device {
         if let Some(depth) = depth {
             self.encoder.clear_depth(&self.main_depth, depth);
         }
+    }
+
+    pub fn clear_render_target(&mut self, texture_id: TextureId, color: [f32; 4]) {
+        let rtv = self.textures.get(&texture_id).unwrap().rtv.clone();
+        self.encoder.clear(&rtv, [color[0], color[1], color[2], color[3]]);
     }
 
     pub fn flush(&mut self) {
