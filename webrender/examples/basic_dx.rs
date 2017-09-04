@@ -119,10 +119,10 @@ fn main() {
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
 
-    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       clip,
-                      ColorF::new(0.0, 1.0, 0.0, 1.0));*/
+                      ColorF::new(0.0, 1.0, 0.0, 1.0));
     let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       clip,
