@@ -195,7 +195,7 @@ impl webrender_traits::RenderNotifier for Notifier {
 
 fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &LayoutRect)
                  -> ClipRegionToken {
-    let mask_image = api.generate_image_key();
+    /*let mask_image = api.generate_image_key();
     api.add_image(mask_image,
                   ImageDescriptor::new(2, 2, ImageFormat::A8, true),
                   ImageData::new(vec![0, 80, 180, 255]),
@@ -204,12 +204,12 @@ fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &Lay
         image: mask_image,
         rect: LayoutRect::new(LayoutPoint::new(75.0, 75.0), LayoutSize::new(100.0, 100.0)),
         repeat: false,
-    };
+    };*/
     let complex = webrender_traits::ComplexClipRegion::new(
         LayoutRect::new(LayoutPoint::new(50.0, 50.0), LayoutSize::new(100.0, 100.0)),
         webrender_traits::BorderRadius::uniform(20.0));
 
-    builder.push_clip_region(bounds, vec![complex], Some(mask))
+    builder.push_clip_region(bounds, vec![complex], None/*Some(mask)*/)
 }
 
 
@@ -276,18 +276,17 @@ fn main() {
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
 
-    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
+let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
-
     let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
     let border_side = webrender_traits::BorderSide {
         color: ColorF::new(0.0, 0.0, 1.0, 1.0),
-        style: webrender_traits::BorderStyle::Groove,
+        style: webrender_traits::BorderStyle::Solid,
     };
     let border_widths = webrender_traits::BorderWidths {
         top: 10.0,
@@ -302,15 +301,14 @@ fn main() {
         left: border_side,
         radius: webrender_traits::BorderRadius::uniform(20.0),
     });
-
     let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_border(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                         clip,
                         border_widths,
-                        border_details);*/
+                        border_details);
 
 
-    if true { // draw text?
+    if false { // draw text?
         let font_key = api.generate_font_key();
         let font_bytes = load_file("res/FreeSans.ttf");
         api.add_raw_font(font_key, font_bytes, 0);
@@ -430,8 +428,8 @@ fn main() {
                 glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Q)) => break 'outer,
                 glutin::Event::KeyboardInput(glutin::ElementState::Pressed,
                                              _, Some(glutin::VirtualKeyCode::P)) => {
-                    //let enable_profiler = !renderer.get_profiler_enabled();
-                    //renderer.set_profiler_enabled(enable_profiler);
+                    let enable_profiler = !renderer.get_profiler_enabled();
+                    renderer.set_profiler_enabled(enable_profiler);
                     api.generate_frame(None);
                 }
                 glutin::Event::Touch(touch) => {
