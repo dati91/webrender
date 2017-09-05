@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT};
-use euclid::Matrix4D;
+use device::{Device, TextureId, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT};
+use euclid::{Matrix4D, Transform3D};
 use gfx;
 use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
 use gfx::memory::Typed;
@@ -662,6 +662,80 @@ impl Device {
         (pso, pso_multiply, pso_max)
     }
 
+
+    pub fn create_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> Program {
+        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
+        {
+            let mut writer = self.factory.write_mapping(&upload).unwrap();
+            for i in 0..MAX_INSTANCE_COUNT {
+                writer[i] = PrimitiveInstances::new();
+            }
+        }
+
+        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
+                                                   gfx::buffer::Role::Vertex,
+                                                   gfx::memory::Usage::Data,
+                                                   gfx::TRANSFER_DST).unwrap();
+
+        let data = primitive::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: self.vertex_buffer.clone(),
+            ibuf: instances,
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color1: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color2: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            dither: (self.dither.view.clone(), self.dither.sampler.clone()),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            layers: (self.layers.view.clone(), self.layers.clone().sampler),
+            render_tasks: (self.render_tasks.view.clone(), self.render_tasks.sampler.clone()),
+            resource_cache: (self.resource_cache.view.clone(), self.resource_cache.sampler.clone()),
+            out_color: self.main_color.raw().clone(),
+            out_depth: self.main_depth.clone(),
+            blend_value: [0.0, 0.0, 0.0, 0.0]
+        };
+        let psos = self.create_prim_psos(vert_src, frag_src);
+        Program::new(data, psos, self.slice.clone(), upload)
+    }
+
+    pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
+        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
+        {
+            let mut writer = self.factory.write_mapping(&upload).unwrap();
+            for i in 0..MAX_INSTANCE_COUNT {
+                writer[i] = ClipInstances::new();
+            }
+        }
+
+        let cache_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
+                                                         gfx::buffer::Role::Vertex,
+                                                         gfx::memory::Usage::Data,
+                                                         gfx::TRANSFER_DST).unwrap();
+
+        let data = clip::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: self.vertex_buffer.clone(),
+            ibuf: cache_instances,
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color1: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color2: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            dither: (self.dither.clone().view, self.dither.clone().sampler),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            layers: (self.layers.clone().view, self.layers.clone().sampler),
+            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
+            resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
+            out_color: self.main_color.raw().clone(),
+            //out_depth: self.dummy_tex.dsv.clone(),
+        };
+        let psos = self.create_clip_psos(vert_src, frag_src);
+        ClipProgram::new(data, psos, self.slice.clone(), upload)
+    }
+
     pub fn create_cache_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> CacheProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
         {
@@ -726,42 +800,6 @@ impl Device {
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
     }
 
-    pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = ClipInstances::new();
-            }
-        }
-
-        let cache_instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                         gfx::buffer::Role::Vertex,
-                                                         gfx::memory::Usage::Data,
-                                                         gfx::TRANSFER_DST).unwrap();
-
-        let data = clip::Data {
-            locals: self.factory.create_constant_buffer(1),
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: cache_instances,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color1: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color2: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),
-            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            //out_depth: self.dummy_tex.dsv.clone(),
-        };
-        let psos = self.create_clip_psos(vert_src, frag_src);
-        ClipProgram::new(data, psos, self.slice.clone(), upload)
-    }
-
     pub fn create_debug_color_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugColorProgram {
         // Creating a dummy vertexbuffer here. This is replaced in the draw_debug_color call.
         let quad_indices: &[u16] = &[0];
@@ -795,6 +833,111 @@ impl Device {
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_font::new()).unwrap();
         DebugFontProgram::new(data, pso, slice)
+    }
+
+    pub fn draw(&mut self,
+                program: &mut Program,
+                proj: &Transform3D<f32>,
+                instances: &[PrimitiveInstance],
+                blendmode: &BlendMode,
+                enable_depth_write: bool) {
+        program.data.transform = proj.to_row_arrays();
+
+        {
+            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i + program.upload.1].update(inst);
+            }
+        }
+
+        {
+            program.slice.instances = Some((instances.len() as u32, 0));
+        }
+
+        if let &BlendMode::Subpixel(ref color) = blendmode {
+            program.data.blend_value = [color.r, color.g, color.b, color.a];
+        }
+
+        let locals = Locals {
+            transform: program.data.transform,
+            device_pixel_ratio: program.data.device_pixel_ratio,
+        };
+        if !self.cache_a8_tex_id.is_skipable() {
+            println!("set a8");
+            program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.cache_rgba8_tex_id.is_skipable() {
+            println!("set rgba8");
+            program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color0_tex_id.is_skipable() {
+            println!("set c0");
+            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color1_tex_id.is_skipable() {
+            println!("set c1");
+            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color2_tex_id.is_skipable() {
+            println!("set c2");
+            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
+        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
+        program.upload.1 += instances.len();
+    }
+
+    pub fn draw_clip(&mut self,
+                     program: &mut ClipProgram,
+                     proj: &Transform3D<f32>,
+                     instances: &[CacheClipInstance],
+                     blendmode: &BlendMode,
+                     texture_id: TextureId) {
+        println!("draw_clip render_target={:?}", texture_id);
+        program.data.transform = proj.to_row_arrays();
+        let tex = self.textures.get(&texture_id).unwrap().clone();
+        program.data.out_color = tex.rtv.unwrap().raw().clone();
+        //program.data.out_depth = self.textures.get(&texture_id).unwrap().dsv.clone();
+        {
+            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i + program.upload.1].update(inst);
+            }
+        }
+
+        {
+            program.slice.instances = Some((instances.len() as u32, 0));
+        }
+
+        let locals = Locals {
+            transform: program.data.transform,
+            device_pixel_ratio: program.data.device_pixel_ratio,
+        };
+        if !self.cache_a8_tex_id.is_skipable() {
+            println!("set a8");
+            program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.cache_rgba8_tex_id.is_skipable() {
+            println!("set rgba8");
+            program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color0_tex_id.is_skipable() {
+            println!("set c0");
+            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color1_tex_id.is_skipable() {
+            println!("set c1");
+            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        if !self.color2_tex_id.is_skipable() {
+            println!("set c2");
+            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
+        }
+        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
+        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
+        program.upload.1 += instances.len();
     }
 
     pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
