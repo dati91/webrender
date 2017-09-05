@@ -428,7 +428,7 @@ impl Device {
         (dev, win)
     }
 
-    /*pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
+    pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
         // TODO add bgra flag
         self.encoder.flush(&mut self.device);
         let tex = self.main_color.raw().get_texture();
@@ -454,7 +454,7 @@ impl Device {
                 }
             }
         }
-    }*/
+    }
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size

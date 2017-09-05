@@ -1927,7 +1927,7 @@ impl Renderer {
         };
         assert_eq!(output.len(), stride * (rect.size.width * rect.size.height) as usize);
         self.device.flush();
-        //self.device.read_pixels(rect, output);
+        self.device.read_pixels(rect, output);
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
