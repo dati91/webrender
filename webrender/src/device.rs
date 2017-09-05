@@ -520,16 +520,23 @@ impl Device {
             return;
         }
 
-        if stride.is_some() {
-            //TODO stride
-            return;
-        }
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let data = match format {
             ImageFormat::A8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), A_STRIDE),
             ImageFormat::RG8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RG_STRIDE),
             ImageFormat::RGB8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RGB_STRIDE),
-            ImageFormat::BGRA8 => pixels.unwrap().to_vec(),
+            ImageFormat::BGRA8 => {
+                let row_length = match stride {
+                    Some(value) => value as usize / RGBA_STRIDE,
+                    None => width as usize,
+                };
+                // Take the stride into account for all rows, except the last one.
+                let data_pitch = row_length * RGBA_STRIDE;
+                let len = data_pitch * (height - 1) as usize + width as usize * RGBA_STRIDE;
+                let pixels = pixels.unwrap();
+                let data = &pixels[0 .. len];
+                Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch,data)
+            }
             _ => unimplemented!(),
         };
         Device::update_texture_data(&mut self.encoder, &texture, [x0 as usize, y0 as usize], [width as usize, height as usize], data.as_slice());
@@ -625,6 +632,22 @@ impl Device {
         mem::replace(&mut texture.data, data.to_vec());*/
     }
 
+    fn convert_data_to_bgra8(width: usize, height: usize, data_pitch: usize, data: &[u8]) -> Vec<u8> {
+        let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
+        for j in 0..height {
+            for i in 0..width {
+                let offset = i*RGBA_STRIDE + j*RGBA_STRIDE*width;
+                let src = &data[j * data_pitch + i * RGBA_STRIDE ..];
+                assert!(offset + 3 < new_data.len()); // optimization
+                // convert from BGRA
+                new_data[offset + 0] = src[2];
+                new_data[offset + 1] = src[1];
+                new_data[offset + 2] = src[0];
+                new_data[offset + 3] = src[3];
+            }
+        }
+        return new_data;
+    }
     /*fn update_texture_data(texture: &mut TextureData,
         x_offset: usize, y_offset: usize,
         width: usize, height: usize,
