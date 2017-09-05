@@ -144,6 +144,7 @@ gfx_defines! {
         ibuf: gfx::InstanceBuffer<PrimitiveInstances> = (),
 
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
@@ -155,7 +156,6 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
     }
 
     pipeline blur {
@@ -187,9 +187,6 @@ gfx_defines! {
         ibuf: gfx::InstanceBuffer<ClipInstances> = (),
 
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
-        color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
@@ -721,16 +718,12 @@ impl Device {
             vbuf: self.vertex_buffer.clone(),
             ibuf: cache_instances,
             color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color1: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color2: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            dither: (self.dither.clone().view, self.dither.clone().sampler),
             cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
             cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
             out_color: self.main_color.raw().clone(),
-            //out_depth: self.dummy_tex.dsv.clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)
@@ -756,13 +749,13 @@ impl Device {
             vbuf: self.vertex_buffer.clone(),
             ibuf: instances,
             color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            dither: (self.dither.clone().view, self.dither.clone().sampler),
             cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
             cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
             out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
         };
         let psos = self.create_cache_psos(vert_src, frag_src);
         CacheProgram::new(data, psos, self.slice.clone(), upload)
@@ -925,14 +918,6 @@ impl Device {
         if !self.color0_tex_id.is_skipable() {
             println!("set c0");
             program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color1_tex_id.is_skipable() {
-            println!("set c1");
-            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color2_tex_id.is_skipable() {
-            println!("set c2");
-            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
         }
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
