@@ -81,23 +81,25 @@ const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
 pub struct Texture<R, T> where R: gfx::Resources,
                                T: gfx::format::TextureFormat {
     pub handle: gfx::handle::Texture<R, T::Surface>,
-    pub rtv: gfx::handle::RenderTargetView<R, T>,
+    pub rtv: Option<gfx::handle::RenderTargetView<R, T>>,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
     //pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
 }
 
 impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat + gfx::format::TextureFormat {
 
-    pub fn empty<F>(factory: &mut F, size: [usize; 2], texture_kind: TextureTarget) -> Result<Texture<R, T>, CombinedError>
+    pub fn empty<F>(factory: &mut F, size: [usize; 2], texture_kind: TextureTarget, flags: gfx::Bind, usage: gfx::memory::Usage) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
-        Texture::create(factory, None, size, texture_kind)
+        Texture::create(factory, None, size, texture_kind, flags, usage)
     }
 
     pub fn create<F>(factory: &mut F,
                      data: Option<&[&[u8]]>,
                      size: [usize; 2],
                      texture_kind: TextureTarget,
+                     flags: gfx::Bind,
+                     usage: gfx::memory::Usage
     ) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
@@ -109,12 +111,20 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat +
         let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
         let tex = try!(factory.create_texture(tex_kind,
                                               1,
-                                              gfx::memory::RENDER_TARGET |
-                                              gfx::memory::SHADER_RESOURCE /*|
-                                              gfx::memory::TRANSFER_SRC*/,
-                                              gfx::memory::Usage::Data,
+                                              flags,
+                                              //gfx::memory::RENDER_TARGET |
+                                              //gfx::memory::SHADER_RESOURCE /*|
+                                              //gfx::memory::TRANSFER_SRC*/,
+                                              //gfx::memory::Usage::Data,
+                                              //gfx::memory::Usage::Dynamic,
+                                              usage,
                                               Some(cty)));
-        let rtv = try!(factory.view_texture_as_render_target(&tex, 0, None));
+        
+        let rtv = if flags.contains(gfx::memory::RENDER_TARGET) {
+             Some(try!(factory.view_texture_as_render_target(&tex, 0, None)))
+        } else {
+            None
+        };
         let levels = (0, tex.get_info().levels - 1);
         let srv = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
 
@@ -366,7 +376,7 @@ impl Device {
         let resource_cache = DataTexture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, MAX_VERTEX_TEXTURE_WIDTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
 
         let mut textures = HashMap::new();
-        let dummy_tex: Texture<R, Rgba8> = Texture::empty(&mut factory, [1,1], TextureTarget::Default).unwrap();
+        let dummy_tex: Texture<R, Rgba8> = Texture::empty(&mut factory, [1,1], TextureTarget::Default, gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET, gfx::memory::Usage::Data).unwrap();
         textures.insert(TextureId::invalid(), dummy_tex.clone());
         textures.insert(TextureId::invalid_a8(), dummy_tex.clone());
         textures.insert(TextureId { name: DUMMY_RGBA8_ID }, dummy_tex.clone());
@@ -461,19 +471,36 @@ impl Device {
         texture_id
     }
 
+    fn create_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        //_filter: TextureFilter,
+        target: TextureTarget,
+        flags: gfx::Bind,
+        usage: gfx::memory::Usage) -> TextureId
+    {
+        let texture_id = self.generate_texture_id();
+        assert!(!self.textures.contains_key(&texture_id));
+        let tex = Texture::empty(&mut self.factory, [width as usize, height as usize], target, flags, usage).unwrap();
+        self.textures.insert(texture_id, tex);
+        texture_id
+    }
+
     pub fn create_empty_texture(&mut self,
                                 width: u32,
                                 height: u32,
                                 _filter: TextureFilter,
                                 target: TextureTarget) -> TextureId {
-        let texture_id = self.generate_texture_id();
-        println!("create_empty_texture texture_id={:?}", texture_id);
-        println!("texture_id={:?} width={:?} height={:?} _filter={:?} target={:?}",
-                  texture_id, width, height, _filter, target);
-        assert!(!self.textures.contains_key(&texture_id));
-        let tex = Texture::empty(&mut self.factory, [width as usize, height as usize], target).unwrap();
-        self.textures.insert(texture_id, tex);
-        texture_id
+        println!("create_empty_texture w={:?} h={:?}", width, height);
+        self.create_texture(width, height, target, gfx::memory::SHADER_RESOURCE, gfx::memory::Usage::Dynamic)
+    }
+
+    pub fn create_cache_texture(&mut self,
+                                width: u32,
+                                height: u32) -> TextureId {
+        println!("create_cache_texture w={:?} h={:?}", width, height);
+        self.create_texture(width, height, TextureTarget::Array, gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET, gfx::memory::Usage::Data)
     }
 
     pub fn update_texture(&mut self,
@@ -488,6 +515,24 @@ impl Device {
         println!("update_texture");
         println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
                   texture_id, x0, y0, width, height, format, stride, pixels.is_some());
+        if pixels.is_none() {
+            //TODO set format
+            return;
+        }
+
+        if stride.is_some() {
+            //TODO stride
+            return;
+        }
+        let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
+        let data = match format {
+            ImageFormat::A8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), A_STRIDE),
+            ImageFormat::RG8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RG_STRIDE),
+            ImageFormat::RGB8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RGB_STRIDE),
+            ImageFormat::BGRA8 => pixels.unwrap().to_vec(),
+            _ => unimplemented!(),
+        };
+        Device::update_texture_data(&mut self.encoder, &texture, [x0 as usize, y0 as usize], [width as usize, height as usize], data.as_slice());
     }
 
     /*pub fn init_texture(&mut self,
@@ -709,7 +754,8 @@ impl Device {
     }
 
     pub fn clear_render_target(&mut self, texture_id: TextureId, color: [f32; 4]) {
-        let rtv = self.textures.get(&texture_id).unwrap().rtv.clone();
+        let tex = self.textures.get(&texture_id).unwrap().clone();
+        let rtv = tex.rtv.unwrap().clone();
         self.encoder.clear(&rtv, [color[0], color[1], color[2], color[3]]);
     }
 
@@ -815,7 +861,8 @@ impl Device {
                      texture_id: TextureId) {
         println!("draw_clip render_target={:?}", texture_id);
         program.data.transform = proj.to_row_arrays();
-        program.data.out_color = self.textures.get(&texture_id).unwrap().rtv.raw().clone();
+        let tex = self.textures.get(&texture_id).unwrap().clone();
+        program.data.out_color = tex.rtv.unwrap().raw().clone();
         //program.data.out_depth = self.textures.get(&texture_id).unwrap().dsv.clone();
         {
             let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
@@ -918,6 +965,35 @@ impl Device {
         }
         assert!(data.len() == max_size);
         data
+    }
+
+pub fn update_texture_data<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
+                                    texture: &Texture<R, F>,
+                                    offset: [usize; 2],
+                                    size: [usize; 2],
+                                    memory: &[T])
+    where S: SurfaceTyped + TextureSurface,
+          S::DataType: Copy,
+          F: Formatted<Surface=S>,
+          F::Channel: TextureChannel,
+          T: Default + Clone + gfx::traits::Pod {
+        //let (width, height) = texture.get_size();
+        let resized_data = Device::convert_sampler_data(memory, (size[0] * size[1] * RGBA_STRIDE) as usize);
+        //assert!(size[0] * size[1] * RGBA_STRIDE == memory.len());
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: offset[0] as u16,
+            yoffset: offset[1] as u16,
+            zoffset: 0,
+            width: size[0] as u16,
+            height: size[1] as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        //let data = gfx::memory::cast_slice(memory);
+        let data = gfx::memory::cast_slice(resized_data.as_slice());
+        encoder.update_texture::<_, F>(&texture.handle, None, img_info, data).unwrap();
     }
 
     pub fn begin_frame(&self) -> FrameId {

@@ -1267,6 +1267,7 @@ impl Renderer {
                                                    mode);
                     }
                     TextureUpdateOp::Update { page_pos_x, page_pos_y, width, height, format, data, stride, offset } => {
+                        println!("TextureUpdateOp::Update");
                         let texture_id = self.cache_texture_id_map[update.id.0];
                         self.device.update_texture(texture_id,
                                                    page_pos_x,
@@ -1275,6 +1276,7 @@ impl Renderer {
                                                    Some(&data[offset as usize..]));
                     }
                     TextureUpdateOp::UpdateForExternalBuffer { rect, id, channel_index, format, stride, offset } => {
+                        println!("TextureUpdateOp::UpdateForExternalBuffer");
                         let handler = self.external_image_handler
                                           .as_mut()
                                           .expect("Found external image, but no handler set!");
@@ -1592,7 +1594,7 @@ impl Renderer {
             // GPUs that I have tested with. It's possible it may be a
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
-            let clear_color = [1.0, 0.0, 0.0, 0.0];
+            let clear_color = [1.0, 1.0, 1.0, 0.0];
             /*self.device.clear_target_rect(Some(clear_color),
                                           None,
                                           target.used_rect());*/
@@ -1709,13 +1711,13 @@ impl Renderer {
                 let texture_id = self.color_render_targets
                                      .pop()
                                      .unwrap_or_else(|| {
-                                         self.device.create_empty_texture(width,
-                                                                          height,
+                                         self.device.create_cache_texture(width,
+                                                                          height/*,
                                                                           TextureFilter::Linear,
-                                                                          TextureTarget::Array)
+                                                                          TextureTarget::Array*/)
                                      });
                 pass.color_texture_id = Some(texture_id);
-                let target_count = pass.required_target_count(RenderTargetKind::Color);
+                /*let target_count = pass.required_target_count(RenderTargetKind::Color);
                 self.device.update_texture(texture_id,
                                            0,
                                            0,
@@ -1724,20 +1726,20 @@ impl Renderer {
                                            ImageFormat::BGRA8,
                                            //RenderTargetMode::LayerRenderTarget(target_count as i32),
                                            None,
-                                           None);
+                                           None);*/
             }
 
             if pass.needs_render_target_kind(RenderTargetKind::Alpha) {
                 let texture_id = self.alpha_render_targets
                                      .pop()
                                      .unwrap_or_else(|| {
-                                         self.device.create_empty_texture(width,
-                                                                          height,
+                                         self.device.create_cache_texture(width,
+                                                                          height/*,
                                                                           TextureFilter::Linear,
-                                                                          TextureTarget::Array)
+                                                                          TextureTarget::Array*/)
                                      });
                 pass.alpha_texture_id = Some(texture_id);
-                let target_count = pass.required_target_count(RenderTargetKind::Alpha);
+                /*let target_count = pass.required_target_count(RenderTargetKind::Alpha);
                 self.device.update_texture(texture_id,
                                            0,
                                            0,
@@ -1746,7 +1748,7 @@ impl Renderer {
                                            ImageFormat::A8,
                                            //RenderTargetMode::LayerRenderTarget(target_count as i32),
                                            None,
-                                           None);
+                                           None);*/
             }
         }
 
