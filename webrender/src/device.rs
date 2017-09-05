@@ -493,7 +493,7 @@ impl Device {
                                 _filter: TextureFilter,
                                 target: TextureTarget) -> TextureId {
         println!("create_empty_texture w={:?} h={:?}", width, height);
-        self.create_texture(width, height, target, gfx::memory::SHADER_RESOURCE, gfx::memory::Usage::Dynamic)
+        self.create_texture(width, height, target, gfx::memory::SHADER_RESOURCE | gfx::memory::TRANSFER_DST, gfx::memory::Usage::Dynamic)
     }
 
     pub fn create_cache_texture(&mut self,
