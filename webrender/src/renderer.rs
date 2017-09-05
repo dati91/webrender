@@ -1634,8 +1634,8 @@ impl Renderer {
             }
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
-                //let texture_id = self.resolve_source_texture(&mask_texture_id);
-                //self.device.bind_texture(TextureSampler::Color0, texture_id);
+                let texture_id = self.resolve_source_texture(&mask_texture_id);
+                self.device.bind_texture(TextureSampler::Color0, texture_id);
 
                 println!("cs_clip_image");
                 self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode, render_target.0);
