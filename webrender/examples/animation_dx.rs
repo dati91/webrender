@@ -57,7 +57,6 @@ fn main() {
         debug: true,
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
-        enable_profiler: true,
         .. Default::default()
     };
 
@@ -103,6 +102,15 @@ fn main() {
 
     events_loop.run_forever(|event| {
         match event {
+            winit::Event::WindowEvent { 
+                event: winit::WindowEvent::KeyboardInput { 
+                    input: winit::KeyboardInput {state: winit::ElementState::Pressed,
+                                                 virtual_keycode: Some(winit::VirtualKeyCode::P), .. }, .. }, .. } => {
+                let enable_profiler = !renderer.get_profiler_enabled();
+                renderer.set_profiler_enabled(enable_profiler);
+                api.generate_frame(None);
+                winit::ControlFlow::Continue
+            },
             winit::Event::WindowEvent { event, .. } => {
                 match event {
                     winit::WindowEvent::Closed => winit::ControlFlow::Break,

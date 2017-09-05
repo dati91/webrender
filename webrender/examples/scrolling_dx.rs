@@ -113,7 +113,6 @@ fn main() {
         debug: true,
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
-        enable_profiler: true,
         .. Default::default()
     };
 
@@ -224,7 +223,15 @@ fn main() {
             winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => {
                 winit::ControlFlow::Break
             },
-
+            winit::Event::WindowEvent { 
+                event: winit::WindowEvent::KeyboardInput { 
+                    input: winit::KeyboardInput {state: winit::ElementState::Pressed,
+                                                 virtual_keycode: Some(winit::VirtualKeyCode::P), .. }, .. }, .. } => {
+                let enable_profiler = !renderer.get_profiler_enabled();
+                renderer.set_profiler_enabled(enable_profiler);
+                api.generate_frame(None);
+                winit::ControlFlow::Continue
+            },
             winit::Event::WindowEvent { event: winit::WindowEvent::MouseMoved{device_id: _, position}, .. }=> {
                 *CURSOR_POSITION.lock().unwrap() = WorldPoint::new(position.0 as f32, position.1 as f32);
                 winit::ControlFlow::Continue

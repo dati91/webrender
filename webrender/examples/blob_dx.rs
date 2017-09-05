@@ -290,7 +290,6 @@ fn main() {
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
         blob_image_renderer: Some(Box::new(CheckerboardRenderer::new(Arc::clone(&workers)))),
-        enable_profiler: true,
         .. Default::default()
     };
 
@@ -368,6 +367,15 @@ fn main() {
         match event {
             winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => {
                 winit::ControlFlow::Break
+            },
+            winit::Event::WindowEvent { 
+                event: winit::WindowEvent::KeyboardInput { 
+                    input: winit::KeyboardInput {state: winit::ElementState::Pressed,
+                                                 virtual_keycode: Some(winit::VirtualKeyCode::P), .. }, .. }, .. } => {
+                let enable_profiler = !renderer.get_profiler_enabled();
+                renderer.set_profiler_enabled(enable_profiler);
+                api.generate_frame(None);
+                winit::ControlFlow::Continue
             },
             _ => {
                 renderer.update();
