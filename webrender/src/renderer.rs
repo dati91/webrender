@@ -68,7 +68,6 @@ use WrapperWindow;
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
-pub const DITHER_ID: u32 = 4;
 pub const VECS_PER_DATA_16: usize = 1;
 pub const VECS_PER_DATA_32: usize = 2;
 pub const VECS_PER_DATA_64: usize = 4;
@@ -664,8 +663,6 @@ pub struct Renderer {
     dummy_cache_texture_id: TextureId,
     dummy_cache_texture_a8_id: TextureId,
 
-    dither_matrix_texture_id: Option<TextureId>,
-
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
     external_image_handler: Option<Box<ExternalImageHandler>>,
@@ -784,15 +781,6 @@ impl Renderer {
 
         let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Array);
         let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Array);
-        let dither_matrix_texture_id = if options.enable_dithering {
-                                           Some(TextureId::new(DITHER_ID, TextureTarget::Default))
-                                       } else {
-                                           None
-                                       };
-
-        if let Some(id) = dither_matrix_texture_id {
-           //device.bind_texture(TextureSampler::Dither, id);
-        }
 
         let gpu_data_textures = GpuDataTextures::new();
 
@@ -912,7 +900,6 @@ impl Renderer {
             cache_texture_id_map: Vec::new(),
             dummy_cache_texture_id: dummy_cache_texture_id,
             dummy_cache_texture_a8_id: dummy_cache_texture_a8_id,
-            dither_matrix_texture_id: dither_matrix_texture_id,
             external_image_handler: None,
             external_images: HashMap::default(),
             vr_compositor_handler: vr_compositor,

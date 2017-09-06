@@ -58,7 +58,7 @@ use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
 use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program, Locals};
 use prim_store::GRADIENT_DATA_SIZE;
 use tiling::{CacheClipInstance, PrimitiveInstance};
-use renderer::{BlendMode, DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID, MAX_VERTEX_TEXTURE_WIDTH};
+use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_RGBA8_ID, MAX_VERTEX_TEXTURE_WIDTH};
 use webrender_traits::DeviceUintRect;
 
 pub type A8 = (R8, Unorm);
@@ -72,7 +72,7 @@ pub const A_STRIDE: usize = 1;
 pub const RG_STRIDE: usize = 2;
 pub const RGB_STRIDE: usize = 3;
 pub const RGBA_STRIDE: usize = 4;
-pub const FIRST_UNRESERVED_ID: u32 = DITHER_ID + 1;
+pub const FIRST_UNRESERVED_ID: u32 = DUMMY_A8_ID + 1;
 // The value of the type GL_FRAMEBUFFER_SRGB from https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_framebuffer_sRGB.txt
 const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
 
@@ -391,8 +391,6 @@ impl Device {
             42, 26, 38, 22, 41, 25, 37, 21
         ];
         let dither = DataTexture::create(&mut factory, None, [8, 8], TextureFilter::Nearest, TextureTarget::Default).unwrap();
-
-        //textures.insert(TextureId { name: DITHER_ID }, dither.surface);
 
         let mut sampler_info = gfx::texture::SamplerInfo::new(
             gfx::texture::FilterMethod::Scale,
