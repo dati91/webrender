@@ -14,7 +14,7 @@ use gfx::format::DepthStencil as DepthFormat;
 use backend::Resources as R;
 use gfx::format::Format;
 use tiling::{BlurCommand, CacheClipInstance, PrimitiveInstance};
-use renderer::BlendMode;
+use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_RGBA8_ID};
 use internal_types::{DebugFontVertex, DebugColorVertex};
 
 const ALPHA: Blend = Blend {
@@ -327,6 +327,11 @@ pub struct Program {
     pub pso_subpixel: (PrimPSO, PrimPSO),
     pub slice: gfx::Slice<R>,
     pub upload: (gfx::handle::Buffer<R, PrimitiveInstances>, usize),
+    pub color0_tex_id: TextureId,
+    pub color1_tex_id: TextureId,
+    pub color2_tex_id: TextureId,
+    pub cache_a8_tex_id: TextureId,
+    pub cache_rgba8_tex_id: TextureId,
 }
 
 impl Program {
@@ -343,6 +348,11 @@ impl Program {
             pso_subpixel: (psos.6, psos.7),
             slice: slice,
             upload: (upload, 0),
+            color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            color1_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            color2_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            cache_a8_tex_id: TextureId { name: DUMMY_A8_ID },
+            cache_rgba8_tex_id: TextureId { name: DUMMY_RGBA8_ID },
         }
     }
 
@@ -358,6 +368,53 @@ impl Program {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
+
+    fn update_dirty_textures(&mut self, device: &mut Device) {
+        if self.color0_tex_id != device.color0_tex_id {
+            self.color0_tex_id = device.color0_tex_id;
+            if device.color0_tex_id.is_skipable() {
+                self.data.color0.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.color1_tex_id != device.color1_tex_id {
+            self.color1_tex_id = device.color1_tex_id;
+            if device.color1_tex_id.is_skipable() {
+                self.data.color1.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color1.0 = device.textures.get(&device.color1_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.color2_tex_id != device.color2_tex_id {
+            self.color2_tex_id = device.color2_tex_id;
+            if device.color2_tex_id.is_skipable() {
+                self.data.color2.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color2.0 = device.textures.get(&device.color2_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_a8_tex_id != device.cache_a8_tex_id {
+            self.cache_a8_tex_id = device.cache_a8_tex_id;
+            if device.cache_a8_tex_id.is_skipable() {
+                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
+            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
+            if device.cache_rgba8_tex_id.is_skipable() {
+                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -367,6 +424,9 @@ pub struct CacheProgram {
     pub pso_alpha: CachePSO,
     pub slice: gfx::Slice<R>,
     pub upload: (gfx::handle::Buffer<R, PrimitiveInstances>, usize),
+    pub color0_tex_id: TextureId,
+    pub cache_a8_tex_id: TextureId,
+    pub cache_rgba8_tex_id: TextureId,
 }
 
 #[allow(dead_code)]
@@ -382,6 +442,9 @@ impl CacheProgram {
             pso_alpha: psos.1,
             slice: slice,
             upload: (upload, 0),
+            color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            cache_a8_tex_id: TextureId { name: DUMMY_A8_ID },
+            cache_rgba8_tex_id: TextureId { name: DUMMY_RGBA8_ID },
         }
     }
 
@@ -395,6 +458,35 @@ impl CacheProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
+
+    fn update_dirty_textures(&mut self, device: &mut Device) {
+        if self.color0_tex_id != device.color0_tex_id {
+            self.color0_tex_id = device.color0_tex_id;
+            if device.color0_tex_id.is_skipable() {
+                self.data.color0.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_a8_tex_id != device.cache_a8_tex_id {
+            self.cache_a8_tex_id = device.cache_a8_tex_id;
+            if device.cache_a8_tex_id.is_skipable() {
+                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
+            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
+            if device.cache_rgba8_tex_id.is_skipable() {
+                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -403,6 +495,9 @@ pub struct BlurProgram {
     pub pso: BlurPSO,
     pub slice: gfx::Slice<R>,
     pub upload: (gfx::handle::Buffer<R, BlurInstances>, usize),
+    pub color0_tex_id: TextureId,
+    pub cache_a8_tex_id: TextureId,
+    pub cache_rgba8_tex_id: TextureId,
 }
 
 #[allow(dead_code)]
@@ -417,11 +512,43 @@ impl BlurProgram {
             pso: pso,
             slice: slice,
             upload: (upload, 0),
+            color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            cache_a8_tex_id: TextureId { name: DUMMY_A8_ID },
+            cache_rgba8_tex_id: TextureId { name: DUMMY_RGBA8_ID },
         }
     }
 
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
+    }
+
+    fn update_dirty_textures(&mut self, device: &mut Device) {
+        if self.color0_tex_id != device.color0_tex_id {
+            self.color0_tex_id = device.color0_tex_id;
+            if device.color0_tex_id.is_skipable() {
+                self.data.color0.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_a8_tex_id != device.cache_a8_tex_id {
+            self.cache_a8_tex_id = device.cache_a8_tex_id;
+            if device.cache_a8_tex_id.is_skipable() {
+                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
+            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
+            if device.cache_rgba8_tex_id.is_skipable() {
+                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
+            }
+        }
     }
 }
 
@@ -433,6 +560,9 @@ pub struct ClipProgram {
     pub pso_max: ClipPSO,
     pub slice: gfx::Slice<R>,
     pub upload: (gfx::handle::Buffer<R, ClipInstances>, usize),
+    pub color0_tex_id: TextureId,
+    pub cache_a8_tex_id: TextureId,
+    pub cache_rgba8_tex_id: TextureId,
 }
 
 #[allow(dead_code)]
@@ -449,6 +579,9 @@ impl ClipProgram {
             pso_max: psos.2,
             slice: slice,
             upload: (upload, 0),
+            color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
+            cache_a8_tex_id: TextureId { name: DUMMY_A8_ID },
+            cache_rgba8_tex_id: TextureId { name: DUMMY_RGBA8_ID },
         }
     }
 
@@ -462,6 +595,35 @@ impl ClipProgram {
 
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
+    }
+
+    fn update_dirty_textures(&mut self, device: &mut Device) {
+        if self.color0_tex_id != device.color0_tex_id {
+            self.color0_tex_id = device.color0_tex_id;
+            if device.color0_tex_id.is_skipable() {
+                self.data.color0.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_a8_tex_id != device.cache_a8_tex_id {
+            self.cache_a8_tex_id = device.cache_a8_tex_id;
+            if device.cache_a8_tex_id.is_skipable() {
+                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
+            }
+        }
+
+        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
+            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
+            if device.cache_rgba8_tex_id.is_skipable() {
+                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
+            }
+        }
     }
 }
 
@@ -492,6 +654,7 @@ pub struct DebugFontProgram {
     pub data: debug_font::Data<R>,
     pub pso: DebugFontPSO,
     pub slice: gfx::Slice<R>,
+    pub color0_tex_id: TextureId,
 }
 
 impl DebugFontProgram {
@@ -503,11 +666,23 @@ impl DebugFontProgram {
             data: data,
             pso: pso,
             slice: slice,
+            color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
         }
     }
 
     pub fn get_pso(&self) -> &DebugFontPSO {
         &self.pso
+    }
+
+    fn update_dirty_textures(&mut self, device: &mut Device) {
+        if self.color0_tex_id != device.color0_tex_id {
+            self.color0_tex_id = device.color0_tex_id;
+            if device.color0_tex_id.is_skipable() {
+                self.data.color0.0 = device.dummy_tex.srv.clone();
+            } else {
+                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
+            }
+        }
     }
 }
 
@@ -790,7 +965,7 @@ impl Device {
             out_depth: self.main_depth.clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
-        BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
+        BlurProgram::new(data, pso, self.slice.clone(), upload)
     }
 
     pub fn create_debug_color_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugColorProgram {
@@ -855,26 +1030,7 @@ impl Device {
             transform: program.data.transform,
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
-        if !self.cache_a8_tex_id.is_skipable() {
-            println!("set a8");
-            program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.cache_rgba8_tex_id.is_skipable() {
-            println!("set rgba8");
-            program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color0_tex_id.is_skipable() {
-            println!("set c0");
-            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color1_tex_id.is_skipable() {
-            println!("set c1");
-            program.data.color1 = (self.textures.get(&self.color1_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color2_tex_id.is_skipable() {
-            println!("set c2");
-            program.data.color2 = (self.textures.get(&self.color2_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
+        program.update_dirty_textures(self);
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
@@ -907,18 +1063,7 @@ impl Device {
             transform: program.data.transform,
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
-        if !self.cache_a8_tex_id.is_skipable() {
-            println!("set a8");
-            program.data.cache_a8 = (self.textures.get(&self.cache_a8_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.cache_rgba8_tex_id.is_skipable() {
-            println!("set rgba8");
-            program.data.cache_rgba8 = (self.textures.get(&self.cache_rgba8_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-        if !self.color0_tex_id.is_skipable() {
-            println!("set c0");
-            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
+        program.update_dirty_textures(self);
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
@@ -938,7 +1083,7 @@ impl Device {
         {
             program.slice.instances = Some((instances.len() as u32, 0));
         }
-
+        program.update_dirty_textures(self);
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
     }
@@ -956,7 +1101,7 @@ impl Device {
         {
             program.slice.instances = Some((blur_commands.len() as u32, 0));
         }
-
+        program.update_dirty_textures(self);
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, blur_commands.len()).unwrap();
         self.encoder.draw(&program.slice, &program.pso, &program.data);
     }
@@ -999,15 +1144,11 @@ impl Device {
             program.slice = slice;
         }
 
-        if !self.color0_tex_id.is_skipable() {
-            println!("set c0");
-            program.data.color0 = (self.textures.get(&self.color0_tex_id).unwrap().srv.clone(), self.sampler.clone());
-        }
-
         let locals = Locals {
             transform: program.data.transform,
             device_pixel_ratio: program.data.device_pixel_ratio,
         };
+        program.update_dirty_textures(self);
         self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         self.encoder.draw(&program.slice, &program.get_pso(), &program.data);
     }
