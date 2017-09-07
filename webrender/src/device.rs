@@ -8,7 +8,7 @@ use internal_types::{BlurAttribute, ClipAttribute, VertexAttribute};
 use internal_types::{DebugFontVertex, DebugColorVertex};
 //use notify::{self, Watcher};
 use super::shader_source;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::fs::File;
 use std::hash::BuildHasherDefault;
 use std::io::Read;
@@ -83,6 +83,7 @@ pub struct Texture<R, T> where R: gfx::Resources,
     pub rtv: Option<gfx::handle::RenderTargetView<R, T>>,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
     //pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
+    pub data: Vec<u8>,
 }
 
 impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat + gfx::format::TextureFormat {
@@ -136,6 +137,7 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat +
             rtv: rtv,
             srv: srv,
             //dsv: dsv,
+            data: vec![0u8; size[0] * size[1] * RGBA_STRIDE],
         })
     }
 
@@ -333,6 +335,7 @@ pub struct Device {
     pub vertex_buffer: gfx::handle::Buffer<R, Position>,
     pub slice: gfx::Slice<R>,
     pub frame_id: FrameId,
+    pub image_batch_set: HashSet<TextureId>,
 }
 
 impl Device {
@@ -421,6 +424,7 @@ impl Device {
             vertex_buffer: vertex_buffer,
             slice: slice,
             frame_id: FrameId::new(0),
+            image_batch_set: HashSet::new(),
         };
         (dev, win)
     }
@@ -532,10 +536,20 @@ impl Device {
                 let len = data_pitch * (height - 1) as usize + width as usize * RGBA_STRIDE;
                 let pixels = pixels.unwrap();
                 let data = &pixels[0 .. len];
-                Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch,data)
+                #[cfg(not(feature = "dx11"))]
+                let res = Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, data);
+                #[cfg(all(target_os = "windows", feature="dx11"))]
+                Device::batch_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, RGBA_STRIDE * MAX_VERTEX_TEXTURE_WIDTH, data);
+                #[cfg(all(target_os = "windows", feature="dx11"))]
+                self.image_batch_set.insert(texture_id);
+                #[cfg(all(target_os = "windows", feature="dx11"))]
+                let res = vec!();
+                res
             }
             _ => unimplemented!(),
         };
+
+        #[cfg(not(feature = "dx11"))]
         Device::update_texture_data(&mut self.encoder, &texture, [x0 as usize, y0 as usize], [width as usize, height as usize], data.as_slice());
     }
 
@@ -645,32 +659,6 @@ impl Device {
         }
         return new_data;
     }
-    /*fn update_texture_data(texture: &mut TextureData,
-        x_offset: usize, y_offset: usize,
-        width: usize, height: usize,
-        data_pitch: usize, new_data: &[u8]
-    ) {
-        assert_eq!(data_pitch * (height-1) + width * texture.stride, new_data.len());
-        for j in 0..height {
-            if texture.stride != RGBA_STRIDE {
-                //fast path
-                let dst_offset = x_offset*texture.stride + (j+y_offset)*texture.pitch;
-                let src = &new_data[j * data_pitch ..];
-                texture.data[dst_offset .. dst_offset + width*texture.stride].copy_from_slice(&src[.. width*texture.stride]);
-                continue;
-            }
-            for i in 0..width {
-                let offset = (i + x_offset)*texture.stride + (j+y_offset)*texture.pitch;
-                let src = &new_data[j * data_pitch + i * texture.stride ..];
-                assert!(offset + 3 < texture.data.len()); // optimization
-                // convert from BGRA
-                texture.data[offset + 0] = src[2];
-                texture.data[offset + 1] = src[1];
-                texture.data[offset + 2] = src[0];
-                texture.data[offset + 3] = src[3];
-            }
-        }
-    }*/
 
     pub fn bind_texture(&mut self,
                         sampler: TextureSampler,
@@ -780,6 +768,15 @@ impl Device {
     }
 
     pub fn flush(&mut self) {
+        for texture_id in &self.image_batch_set {
+            println!("flush batched image {:?}", texture_id);
+            let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
+            let (width, height) = texture.get_size();
+            //println!("data {:?}", texture.data);
+            Device::update_texture_data(&mut self.encoder, &texture, [0 as usize, 0 as usize], [width as usize, height as usize], texture.data.as_slice());
+            //texture.data = vec![0u8; width * height * RGBA_STRIDE];
+        }
+        self.image_batch_set.clear();
         self.encoder.flush(&mut self.device);
     }
 
@@ -856,8 +853,8 @@ pub fn update_texture_data<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
           F::Channel: TextureChannel,
           T: Default + Clone + gfx::traits::Pod {
         //let (width, height) = texture.get_size();
-        let resized_data = Device::convert_sampler_data(memory, (size[0] * size[1] * RGBA_STRIDE) as usize);
-        //assert!(size[0] * size[1] * RGBA_STRIDE == memory.len());
+        assert!(size[0] * size[1] * RGBA_STRIDE == memory.len());
+        //let resized_data = Device::convert_sampler_data(memory, (size[0] * size[1] * RGBA_STRIDE) as usize);
         let img_info = gfx::texture::ImageInfoCommon {
             xoffset: offset[0] as u16,
             yoffset: offset[1] as u16,
@@ -869,9 +866,31 @@ pub fn update_texture_data<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
             mipmap: 0,
         };
 
-        //let data = gfx::memory::cast_slice(memory);
-        let data = gfx::memory::cast_slice(resized_data.as_slice());
+        let data = gfx::memory::cast_slice(memory);
+        //let data = gfx::memory::cast_slice(resized_data.as_slice());
         encoder.update_texture::<_, F>(&texture.handle, None, img_info, data).unwrap();
+    }
+
+    fn batch_texture_data(texture: &mut Texture<R, Rgba8>,
+        x_offset: usize, y_offset: usize,
+        width: usize, height: usize,
+        data_pitch: usize, new_data: &[u8])
+    {
+        println!("batch_texture_data");
+        println!("x0={:?} y0={:?} width={:?} height={:?} data_pitch={:?} new_data.len={:?}",
+                  x_offset, y_offset, width, height, data_pitch, new_data.len());
+        //assert_eq!(data_pitch * (height-1) + width * RGBA_STRIDE, new_data.len());
+        for j in 0..height {
+            for i in 0..width {
+                let offset = (j+y_offset)*data_pitch + (i + x_offset)*RGBA_STRIDE;
+                let src = &new_data[j * RGBA_STRIDE*width + i * RGBA_STRIDE .. (j * RGBA_STRIDE*width + i * RGBA_STRIDE)+4];
+                assert!(offset + 3 < texture.data.len());
+                texture.data[offset + 0] = src[2];
+                texture.data[offset + 1] = src[1];
+                texture.data[offset + 2] = src[0];
+                texture.data[offset + 3] = src[3];
+            }
+        }
     }
 
     pub fn begin_frame(&self) -> FrameId {
