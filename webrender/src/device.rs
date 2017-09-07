@@ -380,7 +380,7 @@ impl Device {
         textures.insert(TextureId::invalid_a8(), dummy_tex.clone());
         textures.insert(TextureId { name: DUMMY_RGBA8_ID }, dummy_tex.clone());
         textures.insert(TextureId { name: DUMMY_A8_ID }, dummy_tex.clone());
-        let dither_matrix = vec![
+        let dither_matrix = [
             00, 48, 12, 60, 03, 51, 15, 63,
             32, 16, 44, 28, 35, 19, 47, 31,
             08, 56, 04, 52, 11, 59, 07, 55,
@@ -390,7 +390,7 @@ impl Device {
             10, 58, 06, 54, 09, 57, 05, 53,
             42, 26, 38, 22, 41, 25, 37, 21
         ];
-        let dither = DataTexture::create(&mut factory, None, [8, 8], TextureFilter::Nearest, TextureTarget::Default).unwrap();
+        let dither = DataTexture::create(&mut factory, Some(&[&dither_matrix]), [8, 8], TextureFilter::Nearest, TextureTarget::Default).unwrap();
 
         let mut sampler_info = gfx::texture::SamplerInfo::new(
             gfx::texture::FilterMethod::Scale,
