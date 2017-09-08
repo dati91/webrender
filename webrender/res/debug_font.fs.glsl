@@ -5,8 +5,8 @@
 #ifdef WR_DX11
 struct v2p {
     vec4 gl_Position : SV_Position;
-    vec4 vColorTexCoord : vColorTexCoord;
     vec4 vColor : vColor;
+    vec2 vColorTexCoord : vColorTexCoord;
 };
 #else
 varying vec2 vColorTexCoord;
@@ -18,7 +18,7 @@ void main(void) {
 #else
 void main(in v2p IN, out p2f OUT) {
     vec4 vColor = IN.vColor;
-    vec4 vColorTexCoord = IN.vColorTexCoord;
+    vec2 vColorTexCoord = IN.vColorTexCoord;
 #endif //WR_DX11
 
 #ifdef SERVO_ES2
