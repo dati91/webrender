@@ -84,14 +84,20 @@ pub struct Texture<R, T> where R: gfx::Resources,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
     //pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
     pub data: Vec<u8>,
+    pub filter: TextureFilter,
 }
 
 impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat + gfx::format::TextureFormat {
 
-    pub fn empty<F>(factory: &mut F, size: [usize; 2], texture_kind: TextureTarget, flags: gfx::Bind, usage: gfx::memory::Usage) -> Result<Texture<R, T>, CombinedError>
+    pub fn empty<F>(factory: &mut F,
+                    size: [usize; 2],
+                    texture_kind: TextureTarget,
+                    flags: gfx::Bind,
+                    usage: gfx::memory::Usage,
+                    filter: TextureFilter) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
-        Texture::create(factory, None, size, texture_kind, flags, usage)
+        Texture::create(factory, None, size, texture_kind, flags, usage, filter)
     }
 
     pub fn create<F>(factory: &mut F,
@@ -99,8 +105,8 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat +
                      size: [usize; 2],
                      texture_kind: TextureTarget,
                      flags: gfx::Bind,
-                     usage: gfx::memory::Usage
-    ) -> Result<Texture<R, T>, CombinedError>
+                     usage: gfx::memory::Usage,
+                     filter: TextureFilter) -> Result<Texture<R, T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
@@ -138,6 +144,7 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::RenderFormat +
             srv: srv,
             //dsv: dsv,
             data: vec![0u8; size[0] * size[1] * RGBA_STRIDE],
+            filter: filter,
         })
     }
 
@@ -320,7 +327,7 @@ pub struct Device {
     pub textures: HashMap<TextureId, Texture<R, Rgba8>>,
     pub dither: DataTexture<R, A8>,
     pub dummy_tex: Texture<R, Rgba8>,
-    pub sampler: gfx::handle::Sampler<R>,
+    pub sampler: (gfx::handle::Sampler<R>, gfx::handle::Sampler<R>),
     pub color0_tex_id: TextureId,
     pub color1_tex_id: TextureId,
     pub color2_tex_id: TextureId,
@@ -378,7 +385,12 @@ impl Device {
         let resource_cache = DataTexture::empty(&mut factory, [MAX_VERTEX_TEXTURE_WIDTH, MAX_VERTEX_TEXTURE_WIDTH], TextureFilter::Nearest, TextureTarget::Default).unwrap();
 
         let mut textures = HashMap::new();
-        let dummy_tex: Texture<R, Rgba8> = Texture::empty(&mut factory, [1,1], TextureTarget::Default, gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET, gfx::memory::Usage::Data).unwrap();
+        let dummy_tex: Texture<R, Rgba8> = Texture::empty(&mut factory,
+                                                          [1,1],
+                                                          TextureTarget::Default,
+                                                          gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET,
+                                                          gfx::memory::Usage::Data,
+                                                          TextureFilter::Nearest).unwrap();
         textures.insert(TextureId::invalid(), dummy_tex.clone());
         textures.insert(TextureId::invalid_a8(), dummy_tex.clone());
         textures.insert(TextureId { name: DUMMY_RGBA8_ID }, dummy_tex.clone());
@@ -395,12 +407,12 @@ impl Device {
         ];
         let dither = DataTexture::create(&mut factory, Some(&[&dither_matrix]), [8, 8], TextureFilter::Nearest, TextureTarget::Default).unwrap();
 
-        let mut sampler_info = gfx::texture::SamplerInfo::new(
-            gfx::texture::FilterMethod::Scale,
-            gfx::texture::WrapMode::Clamp
-        );
-        sampler_info.wrap_mode = (gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Tile);
-        let sampler = factory.create_sampler(sampler_info);
+        let wrap_mode = (gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Tile);
+        let mut sampler_info = gfx::texture::SamplerInfo::new(gfx::texture::FilterMethod::Scale, gfx::texture::WrapMode::Clamp);
+        sampler_info.wrap_mode = wrap_mode;
+        let sampler_nearest = factory.create_sampler(sampler_info);
+        sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
+        let sampler_linear = factory.create_sampler(sampler_info);
 
         let dev = Device {
             device: device,
@@ -409,7 +421,7 @@ impl Device {
             textures: textures,
             dither: dither,
             dummy_tex: dummy_tex,
-            sampler: sampler,
+            sampler: (sampler_nearest, sampler_linear),
             color0_tex_id: TextureId { name: DUMMY_RGBA8_ID },
             color1_tex_id: TextureId { name: DUMMY_RGBA8_ID },
             color2_tex_id: TextureId { name: DUMMY_RGBA8_ID },
@@ -476,14 +488,14 @@ impl Device {
         &mut self,
         width: u32,
         height: u32,
-        //_filter: TextureFilter,
+        filter: TextureFilter,
         target: TextureTarget,
         flags: gfx::Bind,
         usage: gfx::memory::Usage) -> TextureId
     {
         let texture_id = self.generate_texture_id();
         assert!(!self.textures.contains_key(&texture_id));
-        let tex = Texture::empty(&mut self.factory, [width as usize, height as usize], target, flags, usage).unwrap();
+        let tex = Texture::empty(&mut self.factory, [width as usize, height as usize], target, flags, usage, filter).unwrap();
         self.textures.insert(texture_id, tex);
         texture_id
     }
@@ -491,17 +503,22 @@ impl Device {
     pub fn create_empty_texture(&mut self,
                                 width: u32,
                                 height: u32,
-                                _filter: TextureFilter,
+                                filter: TextureFilter,
                                 target: TextureTarget) -> TextureId {
         println!("create_empty_texture w={:?} h={:?}", width, height);
-        self.create_texture(width, height, target, gfx::memory::SHADER_RESOURCE | gfx::memory::TRANSFER_DST, gfx::memory::Usage::Dynamic)
+        self.create_texture(width, height, filter, target, gfx::memory::SHADER_RESOURCE | gfx::memory::TRANSFER_DST, gfx::memory::Usage::Dynamic)
     }
 
     pub fn create_cache_texture(&mut self,
                                 width: u32,
                                 height: u32) -> TextureId {
         println!("create_cache_texture w={:?} h={:?}", width, height);
-        self.create_texture(width, height, TextureTarget::Array, gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET, gfx::memory::Usage::Data)
+        self.create_texture(width,
+                            height,
+                            TextureFilter::Linear,
+                            TextureTarget::Array,
+                            gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET,
+                            gfx::memory::Usage::Data)
     }
 
     #[cfg(not(feature = "dx11"))]

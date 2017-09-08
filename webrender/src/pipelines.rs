@@ -3,9 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use device::{Device, TextureId, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT};
+use device::{Device, TextureFilter, TextureId, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT};
 use euclid::{Matrix4D, Transform3D};
 use gfx;
+use gfx::handle::{ShaderResourceView, Sampler};
 use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
 use gfx::memory::Typed;
 use gfx::Factory;
@@ -319,6 +320,25 @@ impl ClipInstances {
     }
 }
 
+fn update_texture_srv_and_sampler(program_texture_id: &mut TextureId,
+                                  device_texture_id: TextureId,
+                                  device: &mut Device,
+                                  tex_sampler: &mut (ShaderResourceView<R, [f32; 4]>, Sampler<R>)) {
+    if *program_texture_id != device_texture_id {
+        *program_texture_id = device_texture_id;
+        if device_texture_id.is_skipable() {
+            tex_sampler.0 = device.dummy_tex.srv.clone();
+        } else {
+            let tex = device.textures.get(&device_texture_id).unwrap();
+            let sampler = match tex.filter {
+                TextureFilter::Nearest => device.sampler.clone().0,
+                TextureFilter::Linear => device.sampler.clone().1,
+            };
+            *tex_sampler = (tex.srv.clone(), sampler);
+        }
+    }
+}
+
 pub struct Program {
     pub data: primitive::Data<R>,
     pub pso: (PrimPSO, PrimPSO),
@@ -370,50 +390,11 @@ impl Program {
     }
 
     fn update_dirty_textures(&mut self, device: &mut Device) {
-        if self.color0_tex_id != device.color0_tex_id {
-            self.color0_tex_id = device.color0_tex_id;
-            if device.color0_tex_id.is_skipable() {
-                self.data.color0.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.color1_tex_id != device.color1_tex_id {
-            self.color1_tex_id = device.color1_tex_id;
-            if device.color1_tex_id.is_skipable() {
-                self.data.color1.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color1.0 = device.textures.get(&device.color1_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.color2_tex_id != device.color2_tex_id {
-            self.color2_tex_id = device.color2_tex_id;
-            if device.color2_tex_id.is_skipable() {
-                self.data.color2.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color2.0 = device.textures.get(&device.color2_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_a8_tex_id != device.cache_a8_tex_id {
-            self.cache_a8_tex_id = device.cache_a8_tex_id;
-            if device.cache_a8_tex_id.is_skipable() {
-                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
-            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
-            if device.cache_rgba8_tex_id.is_skipable() {
-                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
-            }
-        }
+        update_texture_srv_and_sampler(&mut self.color0_tex_id, device.color0_tex_id, device, &mut self.data.color0);
+        update_texture_srv_and_sampler(&mut self.color1_tex_id, device.color1_tex_id, device, &mut self.data.color1);
+        update_texture_srv_and_sampler(&mut self.color2_tex_id, device.color2_tex_id, device, &mut self.data.color2);
+        update_texture_srv_and_sampler(&mut self.cache_a8_tex_id, device.cache_a8_tex_id, device, &mut self.data.cache_a8);
+        update_texture_srv_and_sampler(&mut self.cache_rgba8_tex_id, device.cache_rgba8_tex_id, device, &mut self.data.cache_rgba8);
     }
 }
 
@@ -460,32 +441,9 @@ impl CacheProgram {
     }
 
     fn update_dirty_textures(&mut self, device: &mut Device) {
-        if self.color0_tex_id != device.color0_tex_id {
-            self.color0_tex_id = device.color0_tex_id;
-            if device.color0_tex_id.is_skipable() {
-                self.data.color0.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_a8_tex_id != device.cache_a8_tex_id {
-            self.cache_a8_tex_id = device.cache_a8_tex_id;
-            if device.cache_a8_tex_id.is_skipable() {
-                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
-            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
-            if device.cache_rgba8_tex_id.is_skipable() {
-                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
-            }
-        }
+        update_texture_srv_and_sampler(&mut self.color0_tex_id, device.color0_tex_id, device, &mut self.data.color0);
+        update_texture_srv_and_sampler(&mut self.cache_a8_tex_id, device.cache_a8_tex_id, device, &mut self.data.cache_a8);
+        update_texture_srv_and_sampler(&mut self.cache_rgba8_tex_id, device.cache_rgba8_tex_id, device, &mut self.data.cache_rgba8);
     }
 }
 
@@ -523,32 +481,9 @@ impl BlurProgram {
     }
 
     fn update_dirty_textures(&mut self, device: &mut Device) {
-        if self.color0_tex_id != device.color0_tex_id {
-            self.color0_tex_id = device.color0_tex_id;
-            if device.color0_tex_id.is_skipable() {
-                self.data.color0.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_a8_tex_id != device.cache_a8_tex_id {
-            self.cache_a8_tex_id = device.cache_a8_tex_id;
-            if device.cache_a8_tex_id.is_skipable() {
-                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
-            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
-            if device.cache_rgba8_tex_id.is_skipable() {
-                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
-            }
-        }
+        update_texture_srv_and_sampler(&mut self.color0_tex_id, device.color0_tex_id, device, &mut self.data.color0);
+        update_texture_srv_and_sampler(&mut self.cache_a8_tex_id, device.cache_a8_tex_id, device, &mut self.data.cache_a8);
+        update_texture_srv_and_sampler(&mut self.cache_rgba8_tex_id, device.cache_rgba8_tex_id, device, &mut self.data.cache_rgba8);
     }
 }
 
@@ -598,32 +533,9 @@ impl ClipProgram {
     }
 
     fn update_dirty_textures(&mut self, device: &mut Device) {
-        if self.color0_tex_id != device.color0_tex_id {
-            self.color0_tex_id = device.color0_tex_id;
-            if device.color0_tex_id.is_skipable() {
-                self.data.color0.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_a8_tex_id != device.cache_a8_tex_id {
-            self.cache_a8_tex_id = device.cache_a8_tex_id;
-            if device.cache_a8_tex_id.is_skipable() {
-                self.data.cache_a8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_a8.0 = device.textures.get(&device.cache_a8_tex_id).unwrap().srv.clone();
-            }
-        }
-
-        if self.cache_rgba8_tex_id != device.cache_rgba8_tex_id {
-            self.cache_rgba8_tex_id = device.cache_rgba8_tex_id;
-            if device.cache_rgba8_tex_id.is_skipable() {
-                self.data.cache_rgba8.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.cache_rgba8.0 = device.textures.get(&device.cache_rgba8_tex_id).unwrap().srv.clone();
-            }
-        }
+        update_texture_srv_and_sampler(&mut self.color0_tex_id, device.color0_tex_id, device, &mut self.data.color0);
+        update_texture_srv_and_sampler(&mut self.cache_a8_tex_id, device.cache_a8_tex_id, device, &mut self.data.cache_a8);
+        update_texture_srv_and_sampler(&mut self.cache_rgba8_tex_id, device.cache_rgba8_tex_id, device, &mut self.data.cache_rgba8);
     }
 }
 
@@ -675,14 +587,7 @@ impl DebugFontProgram {
     }
 
     fn update_dirty_textures(&mut self, device: &mut Device) {
-        if self.color0_tex_id != device.color0_tex_id {
-            self.color0_tex_id = device.color0_tex_id;
-            if device.color0_tex_id.is_skipable() {
-                self.data.color0.0 = device.dummy_tex.srv.clone();
-            } else {
-                self.data.color0.0 = device.textures.get(&device.color0_tex_id).unwrap().srv.clone();
-            }
-        }
+        update_texture_srv_and_sampler(&mut self.color0_tex_id, device.color0_tex_id, device, &mut self.data.color0);
     }
 }
 
@@ -855,12 +760,12 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: instances,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color1: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            color2: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            color1: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            color2: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             dither: (self.dither.view.clone(), self.dither.sampler.clone()),
-            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             layers: (self.layers.view.clone(), self.layers.clone().sampler),
             render_tasks: (self.render_tasks.view.clone(), self.render_tasks.sampler.clone()),
             resource_cache: (self.resource_cache.view.clone(), self.resource_cache.sampler.clone()),
@@ -892,9 +797,9 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: cache_instances,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
@@ -923,10 +828,10 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: instances,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             dither: (self.dither.clone().view, self.dither.clone().sampler),
-            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
@@ -955,9 +860,9 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: blur_instances,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
-            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             resource_cache: (self.resource_cache.clone().view, self.resource_cache.clone().sampler),
@@ -996,7 +901,7 @@ impl Device {
             transform: [[0f32; 4]; 4],
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: vertex_buffer,
-            color0: (self.dummy_tex.srv.clone(), self.sampler.clone()),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.clone().0),
             out_color: self.main_color.raw().clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_font::new()).unwrap();
