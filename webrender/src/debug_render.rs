@@ -174,7 +174,6 @@ impl DebugRenderer {
             device.draw_debug_font(&mut self.font_program, &projection, &self.font_indices, &self.font_vertices);
         }
 
-        device.flush();
         self.font_indices.clear();
         self.font_vertices.clear();
         self.line_vertices.clear();

@@ -1115,6 +1115,7 @@ impl Renderer {
                 let debug_size = DeviceUintSize::new(framebuffer_size.width as u32,
                                                      framebuffer_size.height as u32);
                 self.debug.render(&mut self.device, &debug_size);
+                self.flush();
                 {
                     //let _gm = GpuMarker::new(self.device.rc_gl(), "end frame");
                     self.device.end_frame();
@@ -1823,7 +1824,7 @@ impl Renderer {
                                            //&Transform3D::from_array(projection.to_column_major_array()));
                                            &alpha_projection);
                 }
-                self.flush();
+                //self.flush();
                 let projection = transform_projection(projection);
                 for (target_index, target) in pass.color_targets.targets.iter().enumerate() {
                     let render_target = pass.color_texture_id.map(|texture_id| {
@@ -1836,7 +1837,7 @@ impl Renderer {
                                            clear_color,
                                            &frame.render_task_data,
                                            &projection);
-                    self.flush();
+                    //self.flush();
                 }
                 //self.flush();
 
