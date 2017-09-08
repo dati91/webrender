@@ -504,6 +504,7 @@ impl Device {
         self.create_texture(width, height, TextureTarget::Array, gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET, gfx::memory::Usage::Data)
     }
 
+    #[cfg(not(feature = "dx11"))]
     pub fn update_texture(&mut self,
                           texture_id: TextureId,
                           x0: u32,
@@ -533,24 +534,56 @@ impl Device {
                 };
                 // Take the stride into account for all rows, except the last one.
                 let data_pitch = row_length * RGBA_STRIDE;
-                let len = data_pitch * (height - 1) as usize + width as usize * RGBA_STRIDE;
-                let pixels = pixels.unwrap();
-                let data = &pixels[0 .. len];
-                #[cfg(not(feature = "dx11"))]
-                let res = Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, data);
-                #[cfg(all(target_os = "windows", feature="dx11"))]
-                Device::batch_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, RGBA_STRIDE * MAX_VERTEX_TEXTURE_WIDTH, data);
-                #[cfg(all(target_os = "windows", feature="dx11"))]
-                self.image_batch_set.insert(texture_id);
-                #[cfg(all(target_os = "windows", feature="dx11"))]
-                let res = vec!();
-                res
+                Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels.unwrap())
             }
             _ => unimplemented!(),
         };
-
-        #[cfg(not(feature = "dx11"))]
         Device::update_texture_data(&mut self.encoder, &texture, [x0 as usize, y0 as usize], [width as usize, height as usize], data.as_slice());
+    }
+
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    pub fn update_texture(&mut self,
+                          texture_id: TextureId,
+                          x0: u32,
+                          y0: u32,
+                          width: u32,
+                          height: u32,
+                          format: ImageFormat,
+                          stride: Option<u32>,
+                          pixels: Option<&[u8]>) {
+        println!("update_texture");
+        println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
+                  texture_id, x0, y0, width, height, format, stride, pixels.is_some());
+        if pixels.is_none() {
+            //TODO set format
+            return;
+        }
+
+        let (mut row_length, mut data_pitch);
+        let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
+        let data = match format {
+            ImageFormat::A8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), A_STRIDE),
+            ImageFormat::RG8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RG_STRIDE),
+            ImageFormat::RGB8 => Device::convert_data_to_rgba8(width as usize, height as usize, pixels.unwrap(), RGB_STRIDE),
+            ImageFormat::BGRA8 => {
+                row_length = match stride {
+                    Some(value) => value as usize / RGBA_STRIDE,
+                    None => width as usize,
+                };
+                // Take the stride into account for all rows, except the last one.
+                data_pitch = row_length * RGBA_STRIDE;
+                Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels.unwrap())
+            },
+            _ => unimplemented!(),
+        };
+        let row_length = match stride {
+            Some(value) => value as usize / RGBA_STRIDE,
+            None => texture.get_size().0 as usize,
+        };
+        // Take the stride into account for all rows, except the last one.
+        data_pitch = row_length * RGBA_STRIDE;
+        Device::batch_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data.as_slice());
+        self.image_batch_set.insert(texture_id);
     }
 
     /*pub fn init_texture(&mut self,
@@ -885,9 +918,9 @@ pub fn update_texture_data<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
                 let offset = (j+y_offset)*data_pitch + (i + x_offset)*RGBA_STRIDE;
                 let src = &new_data[j * RGBA_STRIDE*width + i * RGBA_STRIDE .. (j * RGBA_STRIDE*width + i * RGBA_STRIDE)+4];
                 assert!(offset + 3 < texture.data.len());
-                texture.data[offset + 0] = src[2];
+                texture.data[offset + 0] = src[0];
                 texture.data[offset + 1] = src[1];
-                texture.data[offset + 2] = src[0];
+                texture.data[offset + 2] = src[2];
                 texture.data[offset + 3] = src[3];
             }
         }
