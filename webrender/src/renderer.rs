@@ -1269,7 +1269,7 @@ impl Renderer {
                                                    mode);
                     }
                     TextureUpdateOp::Update { page_pos_x, page_pos_y, width, height, format, data, stride, offset } => {
-                        println!("TextureUpdateOp::Update");
+                        //println!("TextureUpdateOp::Update");
                         let texture_id = self.cache_texture_id_map[update.id.0];
                         self.device.update_texture(texture_id,
                                                    page_pos_x,
@@ -1278,7 +1278,7 @@ impl Renderer {
                                                    Some(&data[offset as usize..]));
                     }
                     TextureUpdateOp::UpdateForExternalBuffer { rect, id, channel_index, format, stride, offset } => {
-                        println!("TextureUpdateOp::UpdateForExternalBuffer");
+                        //println!("TextureUpdateOp::UpdateForExternalBuffer");
                         let handler = self.external_image_handler
                                           .as_mut()
                                           .expect("Found external image, but no handler set!");
@@ -1351,7 +1351,7 @@ impl Renderer {
                     render_target: Option<(TextureId, i32)>,
                     target_dimensions: DeviceUintSize,
                     enable_depth_write: bool) {
-        println!("submit_batch render_target={:?}", render_target);
+        //println!("submit_batch render_target={:?}", render_target);
         let transform_kind = batch.key.flags.transform_kind();
         let needs_clipping = batch.key.flags.needs_clipping();
         debug_assert!(!needs_clipping ||
@@ -1525,7 +1525,7 @@ impl Renderer {
         //           fast path blur shaders for common
         //           blur radii with fixed weights.
         if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
-            println!("cs_blur");
+            //println!("cs_blur");
             /*{
                 self.device.draw_blur(&mut self.cs_blur, projection, &target.vertical_blurs);
             }
@@ -1534,7 +1534,7 @@ impl Renderer {
 
         // Draw any box-shadow caches for this target.
         if !target.box_shadow_cache_prims.is_empty() {
-            println!("cs_box_shadow");
+            //println!("cs_box_shadow");
             //self.device.draw_cache(&mut self.cs_box_shadow, projection, &target.box_shadow_cache_prims, &BlendMode::None);
         }
 
@@ -1545,7 +1545,7 @@ impl Renderer {
         // it removes the overhead of submitting many small glyphs
         // to multiple tiles in the normal text run case.
         if !target.text_run_cache_prims.is_empty() {
-            println!("cs_text_run");
+            //println!("cs_text_run");
             //self.device.draw_cache(&mut self.cs_text_run, projection, &target.text_run_cache_prims, &BlendMode::Alpha);
         }
 
@@ -1612,13 +1612,13 @@ impl Renderer {
             // area in the clip mask. This allows drawing multiple invididual clip
             // in regions below.
             if !target.clip_batcher.border_clears.is_empty() {
-                println!("cs_clip_border, border_clears");
+                //println!("cs_clip_border, border_clears");
                 self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.border_clears, &BlendMode::None, render_target.0);
             }
 
             // Draw any dots or dashes for border corners.
             if !target.clip_batcher.borders.is_empty() {
-                println!("cs_clip_border, borders");
+                //println!("cs_clip_border, borders");
                 self.device.draw_clip(&mut self.cs_clip_border, projection, &target.clip_batcher.borders, &BlendMode::Max, render_target.0);
             }
 
@@ -1627,7 +1627,7 @@ impl Renderer {
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
-                println!("cs_clip_rectangle");
+                //println!("cs_clip_rectangle");
                 self.device.draw_clip(&mut self.cs_clip_rectangle,
                                       projection,
                                       &target.clip_batcher.rectangles,
@@ -1639,7 +1639,7 @@ impl Renderer {
                 let texture_id = self.resolve_source_texture(&mask_texture_id);
                 self.device.bind_texture(TextureSampler::Color0, texture_id);
 
-                println!("cs_clip_image");
+                //println!("cs_clip_image");
                 self.device.draw_clip(&mut self.cs_clip_image, projection, &items, &blend_mode, render_target.0);
             }
         }
@@ -1784,7 +1784,7 @@ impl Renderer {
                 let size;
                 let clear_color;
                 let projection;
-                println!("pass.is_framebuffer={:?}",pass.is_framebuffer);
+                //println!("pass.is_framebuffer={:?}",pass.is_framebuffer);
                 if pass.is_framebuffer {
                     clear_color = if self.clear_framebuffer || needs_clear {
                         Some(frame.background_color.map_or(self.clear_color.to_array(), |color| {
@@ -1813,7 +1813,7 @@ impl Renderer {
                 //let p1 = Transform3D::from_array(projection.to_column_major_array());
                 let alpha_projection = alpha_transform_projection(projection);
                 //println!("proj={:?} p2={:?} p2={:?}", projection, p1, p2);
-                println!("bind cache samplers");
+                //println!("bind cache samplers");
                 self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
                 self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
 

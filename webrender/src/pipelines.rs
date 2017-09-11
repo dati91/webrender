@@ -948,7 +948,7 @@ impl Device {
                      instances: &[CacheClipInstance],
                      blendmode: &BlendMode,
                      texture_id: TextureId) {
-        println!("draw_clip render_target={:?}", texture_id);
+        //println!("draw_clip render_target={:?}", texture_id);
         program.data.transform = proj.to_row_arrays();
         let tex = self.textures.get(&texture_id).unwrap().clone();
         program.data.out_color = tex.rtv.unwrap().raw().clone();

@@ -505,14 +505,14 @@ impl Device {
                                 height: u32,
                                 filter: TextureFilter,
                                 target: TextureTarget) -> TextureId {
-        println!("create_empty_texture w={:?} h={:?}", width, height);
+        //println!("create_empty_texture w={:?} h={:?}", width, height);
         self.create_texture(width, height, filter, target, gfx::memory::SHADER_RESOURCE | gfx::memory::TRANSFER_DST, gfx::memory::Usage::Dynamic)
     }
 
     pub fn create_cache_texture(&mut self,
                                 width: u32,
                                 height: u32) -> TextureId {
-        println!("create_cache_texture w={:?} h={:?}", width, height);
+        //println!("create_cache_texture w={:?} h={:?}", width, height);
         self.create_texture(width,
                             height,
                             TextureFilter::Linear,
@@ -531,9 +531,9 @@ impl Device {
                           format: ImageFormat,
                           stride: Option<u32>,
                           pixels: Option<&[u8]>) {
-        println!("update_texture");
-        println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
-                  texture_id, x0, y0, width, height, format, stride, pixels.is_some());
+        //println!("update_texture");
+        //println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
+        //          texture_id, x0, y0, width, height, format, stride, pixels.is_some());
         if pixels.is_none() {
             //TODO set format
             return;
@@ -568,9 +568,9 @@ impl Device {
                           format: ImageFormat,
                           stride: Option<u32>,
                           pixels: Option<&[u8]>) {
-        println!("update_texture");
-        println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
-                  texture_id, x0, y0, width, height, format, stride, pixels.is_some());
+        //println!("update_texture");
+        //println!("texture_id={:?} x0={:?} y0={:?} width={:?} height={:?} format={:?} stride={:?} pixels={:?}",
+        //          texture_id, x0, y0, width, height, format, stride, pixels.is_some());
         if pixels.is_none() {
             //TODO set format
             return;
@@ -589,6 +589,7 @@ impl Device {
                 };
                 // Take the stride into account for all rows, except the last one.
                 data_pitch = row_length * RGBA_STRIDE;
+                println!("PITCH1: {:?}", data_pitch);
                 Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels.unwrap())
             },
             _ => unimplemented!(),
@@ -599,6 +600,7 @@ impl Device {
         };
         // Take the stride into account for all rows, except the last one.
         data_pitch = row_length * RGBA_STRIDE;
+        println!("PITCH2: {:?}", data_pitch);
         Device::batch_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data.as_slice());
         self.image_batch_set.insert(texture_id);
     }
@@ -667,7 +669,7 @@ impl Device {
                           format: ImageFormat,
                           _filter: TextureFilter,
                           _mode: RenderTargetMode) {
-        println!("resize_texture {:?}", texture_id);
+        //println!("resize_texture {:?}", texture_id);
         /*let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let stride = match format {
             ImageFormat::A8 => A_STRIDE,
@@ -685,7 +687,7 @@ impl Device {
     }
 
     pub fn deinit_texture(&mut self, texture_id: TextureId) {
-        println!("deinit_texture {:?}", texture_id);
+        //println!("deinit_texture {:?}", texture_id);
         /*let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let (w, h) = self.color0.get_size();
         let data = vec![0u8; w * h * texture.stride];
@@ -713,7 +715,7 @@ impl Device {
     pub fn bind_texture(&mut self,
                         sampler: TextureSampler,
                         texture_id: TextureId) {
-        println!("bind_texture texture_id={:?}", texture_id);
+        //println!("bind_texture texture_id={:?}", texture_id);
         /*if texture_id.is_skipable() {
             return;
         }*/
@@ -819,7 +821,7 @@ impl Device {
 
     pub fn flush(&mut self) {
         for texture_id in &self.image_batch_set {
-            println!("flush batched image {:?}", texture_id);
+            //println!("flush batched image {:?}", texture_id);
             let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
             let (width, height) = texture.get_size();
             //println!("data {:?}", texture.data);
@@ -926,9 +928,9 @@ pub fn update_texture_data<S, F, T>(encoder: &mut gfx::Encoder<R,CB>,
         width: usize, height: usize,
         data_pitch: usize, new_data: &[u8])
     {
-        println!("batch_texture_data");
-        println!("x0={:?} y0={:?} width={:?} height={:?} data_pitch={:?} new_data.len={:?}",
-                  x_offset, y_offset, width, height, data_pitch, new_data.len());
+        //println!("batch_texture_data");
+        //println!("x0={:?} y0={:?} width={:?} height={:?} data_pitch={:?} new_data.len={:?}",
+        //          x_offset, y_offset, width, height, data_pitch, new_data.len());
         //assert_eq!(data_pitch * (height-1) + width * RGBA_STRIDE, new_data.len());
         for j in 0..height {
             for i in 0..width {
