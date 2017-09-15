@@ -589,7 +589,7 @@ impl Device {
                 };
                 // Take the stride into account for all rows, except the last one.
                 data_pitch = row_length * RGBA_STRIDE;
-                println!("PITCH1: {:?}", data_pitch);
+                //println!("PITCH1: {:?}", data_pitch);
                 Device::convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels.unwrap())
             },
             _ => unimplemented!(),
@@ -600,7 +600,7 @@ impl Device {
         };
         // Take the stride into account for all rows, except the last one.
         data_pitch = row_length * RGBA_STRIDE;
-        println!("PITCH2: {:?}", data_pitch);
+        //println!("PITCH2: {:?}", data_pitch);
         Device::batch_texture_data(texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data.as_slice());
         self.image_batch_set.insert(texture_id);
     }
