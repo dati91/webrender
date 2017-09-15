@@ -9,7 +9,12 @@ struct ImageMaskData {
 
 ImageMaskData fetch_mask_data(int index) {
     vec4 data = fetch_from_resource_cache_1(index);
-    return ImageMaskData(RectWithSize(data.xy, data.zw));
+    RectWithSize rect;
+    rect.p0 = data.xy;
+    rect.size = data.zw;
+    ImageMaskData image_mask_data;
+    image_mask_data.local_rect = rect;
+    return image_mask_data;
 }
 
 void main(void) {
