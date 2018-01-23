@@ -25,7 +25,7 @@ use debug_colors;
 //use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{Device, FrameId, /*Program,*/ PrimitiveInstance, Texture, VertexDescriptor};
+use device::{Device, FrameId, Program, PrimitiveInstance, Texture, VertexDescriptor};
 use device::{ExternalTexture, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{TextureFilter, TextureTarget};
 use euclid::{rect, TypedScale, Transform3D};
@@ -69,6 +69,7 @@ use util::TransformedRectKind;
 use hal;
 use winit;
 use back;
+use parser;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
@@ -926,7 +927,7 @@ impl CacheTexture {
                     );
 
                     //uploader.upload(rect, 0, None, cpu_blocks);
-                    println!("upload rect={:?} cpu_blocks={:?}", rect, cpu_blocks);
+                    //println!("upload rect={:?} cpu_blocks={:?}", rect, cpu_blocks);
                     let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
                     device.update_resource_cache(rect, &data_blocks);
                     //device.update_resource_cache(rect, &cpu_blocks.into());
@@ -976,6 +977,10 @@ pub struct Renderer {
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
+
+    ps_line: Program<back::Backend>,
+    ps_border_corner: Program<back::Backend>,
+    ps_border_edge: Program<back::Backend>,
 
     max_texture_size: u32,
 
@@ -1094,6 +1099,12 @@ impl Renderer {
             instance,
             surface,
         );
+
+        let json = parser::read_json();
+
+        let mut ps_line = device.create_program(&json, "ps_line".to_owned());
+        let mut ps_border_corner = device.create_program(&json, "ps_border_corner".to_owned());
+        let mut ps_border_edge = device.create_program(&json, "ps_border_edge".to_owned());
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -1332,17 +1343,17 @@ impl Renderer {
             cs_clip_image,
             ps_text_run,
             ps_image,
-            ps_yuv_image,
+            ps_yuv_image,*/
             ps_border_corner,
             ps_border_edge,
-            ps_gradient,
+            /*ps_gradient,
             ps_angle_gradient,
             ps_radial_gradient,
             ps_blend,
             ps_hw_composite,
             ps_split_composite,
-            ps_composite,
-            ps_line,*/
+            ps_composite,*/
+            ps_line,
             //debug: debug_renderer,
             debug_flags,
             //backend_profile_counters: BackendProfileCounters::new(),
@@ -2104,8 +2115,8 @@ impl Renderer {
         framebuffer_size: DeviceUintSize,
         stats: &mut RendererStats,
     ) {
-        match key.kind {
-            BatchKind::Composite { .. } => {
+        let mut program = match key.kind {
+            /*BatchKind::Composite { .. } => {
 //                self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
             }
             BatchKind::HardwareComposite => {
@@ -2149,10 +2160,10 @@ impl Renderer {
 //                        );
                     }
                 }
-            }
+            }*/
             BatchKind::Transformable(transform_kind, batch_kind) => match batch_kind {
                 TransformBatchKind::Line => {
-                    self.device.ps_line.bind(
+                    /*self.ps_line.bind(
                         &self.device.device,
                         //transform_kind,
                         projection,
@@ -2162,8 +2173,10 @@ impl Renderer {
                         ).collect::<Vec<PrimitiveInstance>>(),
                         //&mut self.renderer_errors,
                     );
-                }
-                TransformBatchKind::TextRun(..) => {
+                    self.device.draw(&mut self.ps_line);*/
+                    &mut self.ps_line
+                },
+                /*TransformBatchKind::TextRun(..) => {
                     unreachable!("bug: text batches are special cased");
                 }
                 TransformBatchKind::Image(image_buffer_kind) => {
@@ -2191,7 +2204,7 @@ impl Renderer {
 //                            0,
 //                            &mut self.renderer_errors,
 //                        );
-                }
+                }*/
                 TransformBatchKind::BorderCorner => {
 //                    self.ps_border_corner.bind(
 //                        &mut self.device,
@@ -2200,6 +2213,7 @@ impl Renderer {
 //                        0,
 //                        &mut self.renderer_errors,
 //                    );
+                    &mut self.ps_border_corner
                 }
                 TransformBatchKind::BorderEdge => {
 //                    self.ps_border_edge.bind(
@@ -2209,8 +2223,9 @@ impl Renderer {
 //                        0,
 //                        &mut self.renderer_errors,
 //                    );
+                    &mut self.ps_border_edge
                 }
-                TransformBatchKind::AlignedGradient => {
+                /*TransformBatchKind::AlignedGradient => {
 //                    self.ps_gradient.bind(
 //                        &mut self.device,
 //                        transform_kind,
@@ -2236,8 +2251,10 @@ impl Renderer {
 //                        0,
 //                        &mut self.renderer_errors,
 //                    );
-                }
+                }*/
+                _ => unreachable!("TODO {:?}", key.kind),
             },
+            _ => unreachable!("TODO {:?}", key.kind),
         };
 
         // Handle special case readback for composites.
@@ -2305,12 +2322,23 @@ impl Renderer {
         }
 
 //        let _timer = self.gpu_profile.start_timer(key.kind.gpu_sampler_tag());
-        self.draw_instanced_batch(
+        /*self.draw_instanced_batch(
             instances,
             VertexArrayKind::Primitive,
             &key.textures,
             stats
+        );*/
+        program.bind(
+            &self.device.device,
+            //transform_kind,
+            projection,
+            0,
+            &instances.iter().map(|pi|
+                PrimitiveInstance::new(pi.data)
+            ).collect::<Vec<PrimitiveInstance>>(),
+            //&mut self.renderer_errors,
         );
+        self.device.draw(&mut program);
     }
 
     fn handle_scaling(
@@ -3568,14 +3596,14 @@ impl Renderer {
         }
         for (_, target) in self.output_targets {
 //            self.device.delete_fbo(target.fbo_id);
-        }
-        self.ps_border_corner.deinit(&mut self.device);
-        self.ps_border_edge.deinit(&mut self.device);
-        self.ps_gradient.deinit(&mut self.device);
+        }*/
+        self.ps_border_corner.cleanup(&self.device.device);
+        self.ps_border_edge.cleanup(&self.device.device);
+        /*self.ps_gradient.deinit(&mut self.device);
         self.ps_angle_gradient.deinit(&mut self.device);
-        self.ps_radial_gradient.deinit(&mut self.device);
-        self.ps_line.deinit(&mut self.device);
-        self.ps_blend.deinit(&mut self.device);
+        self.ps_radial_gradient.deinit(&mut self.device);*/
+        self.ps_line.cleanup(&self.device.device);
+        /*self.ps_blend.deinit(&mut self.device);
         self.ps_hw_composite.deinit(&mut self.device);
         self.ps_split_composite.deinit(&mut self.device);
         self.ps_composite.deinit(&mut self.device);*/

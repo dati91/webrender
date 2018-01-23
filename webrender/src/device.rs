@@ -459,8 +459,8 @@ impl<B: hal::Backend> Program<B> {
                 hal::pso::BlendState::ALPHA,
             ));
 
-            pipeline_descriptor.vertex_buffers = parser::create_vertex_buffer_descriptors(&json, "ps_line");
-            pipeline_descriptor.attributes = parser::create_attribute_descriptors(&json, "ps_line");
+            pipeline_descriptor.vertex_buffers = parser::create_vertex_buffer_descriptors(&json, shader_name.as_str());
+            pipeline_descriptor.attributes = parser::create_attribute_descriptors(&json, shader_name.as_str());
 
             //device.create_graphics_pipelines(&[pipeline_desc])
             device
@@ -678,7 +678,8 @@ pub struct Device<B: hal::Backend> {
     pub render_tasks: VertexDataImage<B>,
     pub node_data: VertexDataImage<B>,
     pub image_uploads: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
-    pub ps_line: Program<B>,
+    //pub ps_line: Program<B>,
+    pub current_frame_id: usize,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -746,7 +747,7 @@ impl<B: hal::Backend> Device<B> {
         let render_pass = {
             let attachment = hal::pass::Attachment {
                 format: Some(surface_format),
-                ops: hal::pass::AttachmentOps::new(hal::pass::AttachmentLoadOp::Clear, hal::pass::AttachmentStoreOp::Store),
+                ops: hal::pass::AttachmentOps::new(hal::pass::AttachmentLoadOp::Load, hal::pass::AttachmentStoreOp::Store),
                 stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
                 layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
             };
@@ -800,15 +801,15 @@ impl<B: hal::Backend> Device<B> {
             depth: 0.0 .. 1.0,
         };
 
-        let json = parser::read_json();
+        //let json = parser::read_json();
 
-        let mut ps_line = Program::create(
+        /*let mut ps_line = Program::create(
             &json,
             &device,
             &memory_types,
             "ps_line".to_owned(),
             &render_pass,
-        );
+        );*/
 
         // Samplers
 
@@ -855,7 +856,7 @@ impl<B: hal::Backend> Device<B> {
                 TEXTURE_HEIGHT as u32
             );
 
-        ps_line.init_vertex_data(
+        /*ps_line.init_vertex_data(
             &device,
             hal::pso::DescriptorWrite::SampledImage(vec![(&resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
             hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
@@ -863,7 +864,7 @@ impl<B: hal::Backend> Device<B> {
             hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
             hal::pso::DescriptorWrite::SampledImage(vec![(&render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
             hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-        );
+        );*/
 
         let image_uploads = Vec::new();
 
@@ -883,8 +884,49 @@ impl<B: hal::Backend> Device<B> {
             render_tasks,
             node_data,
             image_uploads,
-            ps_line,
+            current_frame_id: 0,
         }
+    }
+
+    pub fn create_program(
+        &mut self,
+        json: &Value,
+        shader_name: String
+    ) -> Program<B> {
+        let mut program = Program::create(
+            json,
+            &self.device,
+            &self.memory_types,
+            shader_name,
+            &self.render_pass,
+        );
+        program.init_vertex_data(
+            &self.device,
+            hal::pso::DescriptorWrite::SampledImage(vec![(&self.resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![(&self.node_data.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![(&self.render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+        );
+        program
+    }
+
+    pub fn draw(
+        &mut self,
+        program: &mut Program<B>,
+        //blend_mode: &BlendMode,
+        //enable_depth_write: bool
+    ) {
+        let submit = program.submit(
+            &mut self.command_pool,
+            self.viewport.clone(),
+            &self.render_pass,
+            &self.framebuffers[self.current_frame_id],
+            &vec![/*hal::command::ClearValue::Color(hal::command::ClearColor::Float([0.3, 0.0, 0.0, 1.0]))*/],
+        );
+
+        self.image_uploads.push(submit);
     }
 
     pub fn create_texture(&mut self, target: TextureTarget) -> Texture {
@@ -930,7 +972,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn cleanup(mut self) {
-        self.ps_line.cleanup(&self.device);
+        //self.ps_line.cleanup(&self.device);
         self.device.destroy_command_pool(self.command_pool.downgrade());
         self.device.destroy_renderpass(self.render_pass);
         for framebuffer in self.framebuffers {
@@ -950,16 +992,7 @@ impl<B: hal::Backend> Device<B> {
             //self.command_pool.reset();
 
             let frame = self.swap_chain.acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
-
-            let submit = self.ps_line.submit(
-                &mut self.command_pool,
-                self.viewport.clone(),
-                &self.render_pass,
-                &self.framebuffers[frame.id()],
-                &vec![hal::command::ClearValue::Color(hal::command::ClearColor::Float([0.3, 0.0, 0.0, 1.0]))],
-            );
-
-            self.image_uploads.push(submit);
+            assert_eq!(frame.id(), self.current_frame_id);
 
             let submission = Submission::new()
                 .wait_on(&[(&mut frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
@@ -972,6 +1005,7 @@ impl<B: hal::Backend> Device<B> {
 
             // present frame
             self.swap_chain.present(&mut self.queue_group.queues[0], &[]);
+            self.current_frame_id = (self.current_frame_id + 1) % self.framebuffers.len();
         }
         self.image_uploads.clear();
         self.device.destroy_fence(frame_fence);
