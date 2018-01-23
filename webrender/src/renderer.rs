@@ -1822,7 +1822,7 @@ impl Renderer {
                 };
 //                self.device.bind_draw_target(None, None);
 //                self.device.enable_depth_write();
-//                self.device.clear_target(clear_color, clear_depth_value, None);
+                self.device.clear_target(clear_color, clear_depth_value, None);
 //                self.device.disable_depth_write();
             }
 

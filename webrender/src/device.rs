@@ -949,6 +949,54 @@ impl<B: hal::Backend> Device<B> {
         self.image_uploads.push(submit);
     }
 
+    pub fn clear_target(
+        &mut self,
+        color: Option<[f32; 4]>,
+        depth: Option<f32>,
+        rect: Option<DeviceIntRect>,
+    ) {
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer();
+
+        if let Some(rect) = rect {
+            cmd_buffer.set_scissors(&[
+                hal::command::Rect {
+                    x: rect.origin.x as u16,
+                    y: rect.origin.y as u16,
+                    w: rect.size.width as u16,
+                    h: rect.size.height as u16,
+                }
+            ]);
+        }
+
+        if let Some(color) = color {
+            cmd_buffer.clear_color_image(
+                &self.frame_images[self.current_frame_id].0,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                hal::image::SubresourceRange {
+                            aspects: hal::format::AspectFlags::COLOR,
+                            levels: 0 .. 1,
+                            layers: 0 .. 1,
+                        },
+                hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]])
+            );
+        }
+
+        // TODO enable it when the crash is resolved
+        /*if let Some(depth) = depth {
+            cmd_buffer.clear_depth_stencil_image(
+                &self.frame_images[self.current_frame_id].0,
+                hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+                hal::image::SubresourceRange {
+                            aspects: hal::format::AspectFlags::DEPTH,
+                            levels: 0 .. 1,
+                            layers: 0 .. 1,
+                        },
+                hal::command::ClearDepthStencil(depth, 0)
+            );
+        }*/
+        self.image_uploads.push(cmd_buffer.finish());
+    }
+
     pub fn create_texture(&mut self, target: TextureTarget) -> Texture {
         Texture { target, width: 0, height: 0,  layer_count: 0, format: ImageFormat::Invalid }
     }
