@@ -53,6 +53,36 @@ impl Example for App {
             LineStyle::Solid,
         );
 
+        let info = LayoutPrimitiveInfo::new((300, 100).to(400, 200));
+        builder.push_line(
+            &info,
+            0.0,
+            LineOrientation::Horizontal,
+            &ColorF::new(1.0, 1.0, 0.0, 1.0),
+            LineStyle::Solid,
+        );
+
+        let border_side = BorderSide {
+            color: ColorF::new(0.0, 0.0, 1.0, 1.0),
+            style: BorderStyle::Groove,
+        };
+        let border_widths = BorderWidths {
+            top: 10.0,
+            left: 10.0,
+            bottom: 10.0,
+            right: 10.0,
+        };
+        let border_details = BorderDetails::Normal(NormalBorder {
+            top: border_side,
+            right: border_side,
+            bottom: border_side,
+            left: border_side,
+            radius: BorderRadius::uniform(20.0),
+        });
+
+        let info = LayoutPrimitiveInfo::new((100, 400).to(200, 600));
+        builder.push_border(&info, border_widths, border_details);
+
         builder.pop_clip_id();
         builder.pop_stacking_context();
     }
