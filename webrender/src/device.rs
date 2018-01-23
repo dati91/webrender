@@ -329,7 +329,6 @@ pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
     pub data_stride: usize,
-    //pub buffer_max_size: usize,
 }
 
 impl<B: hal::Backend> Buffer<B> {
@@ -558,7 +557,7 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         device: &B::Device,
         projection: &Transform3D<f32>,
-        umode: i32,
+        uMode: i32,
         instances: &[PrimitiveInstance],
 //        renderer_errors: &mut Vec<RendererError>,
     ) {
@@ -578,7 +577,7 @@ impl<B: hal::Backend> Program<B> {
                 Locals {
                     uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
                     uDevicePixelRatio: 1.0,
-                    uMode: umode,
+                    uMode,
                 }
             ];
         self.locals_buffer.update(
@@ -697,8 +696,7 @@ pub struct Device<B: hal::Backend> {
     pub resource_cache: VertexDataImage<B>,
     pub render_tasks: VertexDataImage<B>,
     pub node_data: VertexDataImage<B>,
-    pub image_uploads: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
-    //pub ps_line: Program<B>,
+    pub upload_queue: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
     pub current_frame_id: usize,
 }
 
@@ -821,16 +819,6 @@ impl<B: hal::Backend> Device<B> {
             depth: 0.0 .. 1.0,
         };
 
-        //let json = parser::read_json();
-
-        /*let mut ps_line = Program::create(
-            &json,
-            &device,
-            &memory_types,
-            "ps_line".to_owned(),
-            &render_pass,
-        );*/
-
         // Samplers
 
         let sampler_linear = device.create_sampler(
@@ -876,18 +864,6 @@ impl<B: hal::Backend> Device<B> {
                 TEXTURE_HEIGHT as u32
             );
 
-        /*ps_line.init_vertex_data(
-            &device,
-            hal::pso::DescriptorWrite::SampledImage(vec![(&resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
-            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-            hal::pso::DescriptorWrite::SampledImage(vec![(&node_data.image_srv, hal::image::ImageLayout::Undefined)]),
-            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-            hal::pso::DescriptorWrite::SampledImage(vec![(&render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
-            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-        );*/
-
-        let image_uploads = Vec::new();
-
         Device {
             device,
             memory_types,
@@ -903,7 +879,7 @@ impl<B: hal::Backend> Device<B> {
             resource_cache,
             render_tasks,
             node_data,
-            image_uploads,
+            upload_queue: Vec::new(),
             current_frame_id: 0,
         }
     }
@@ -943,10 +919,10 @@ impl<B: hal::Backend> Device<B> {
             self.viewport.clone(),
             &self.render_pass,
             &self.framebuffers[self.current_frame_id],
-            &vec![/*hal::command::ClearValue::Color(hal::command::ClearColor::Float([0.3, 0.0, 0.0, 1.0]))*/],
+            &vec![],
         );
 
-        self.image_uploads.push(submit);
+        self.upload_queue.push(submit);
     }
 
     pub fn clear_target(
@@ -994,7 +970,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::command::ClearDepthStencil(depth, 0)
             );
         }*/
-        self.image_uploads.push(cmd_buffer.finish());
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
     pub fn create_texture(&mut self, target: TextureTarget) -> Texture {
@@ -1003,7 +979,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &Vec<[f32; 4]>) {
         debug_assert_eq!(gpu_data.len(), 1024);
-        self.image_uploads.push(
+        self.upload_queue.push(
             self.resource_cache.update_buffer_and_submit_upload(
                 &mut self.device,
                 &mut self.command_pool,
@@ -1014,7 +990,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn update_render_tasks(&mut self, task_data: &Vec<[f32; 12]>) {
-        self.image_uploads.push(
+        self.upload_queue.push(
             self.render_tasks.update_buffer_and_submit_upload(
                 &mut self.device,
                 &mut self.command_pool,
@@ -1025,7 +1001,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn update_node_data(&mut self, node_data: &Vec<[f32; 28]>) {
-        self.image_uploads.push(
+        self.upload_queue.push(
             self.node_data.update_buffer_and_submit_upload(
                 &mut self.device,
                 &mut self.command_pool,
@@ -1040,7 +1016,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn cleanup(mut self) {
-        //self.ps_line.cleanup(&self.device);
         self.device.destroy_command_pool(self.command_pool.downgrade());
         self.device.destroy_renderpass(self.render_pass);
         for framebuffer in self.framebuffers {
@@ -1057,14 +1032,13 @@ impl<B: hal::Backend> Device<B> {
         let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
             self.device.reset_fences(&[&frame_fence]);
-            //self.command_pool.reset();
 
             let frame = self.swap_chain.acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
             assert_eq!(frame.id(), self.current_frame_id);
 
             let submission = Submission::new()
                 .wait_on(&[(&mut frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
-                .submit(&self.image_uploads);
+                .submit(&self.upload_queue);
             self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
 
@@ -1075,7 +1049,7 @@ impl<B: hal::Backend> Device<B> {
             self.swap_chain.present(&mut self.queue_group.queues[0], &[]);
             self.current_frame_id = (self.current_frame_id + 1) % self.framebuffers.len();
         }
-        self.image_uploads.clear();
+        self.upload_queue.clear();
         self.device.destroy_fence(frame_fence);
         self.device.destroy_semaphore(frame_semaphore);
     }
