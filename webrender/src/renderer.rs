@@ -1842,6 +1842,7 @@ impl Renderer {
                     //cpu_frame_id,
                     &mut stats
                 );
+                self.flush()
 
 //                if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
 //                    frame_profiles.push(frame.profile_counters.clone());
@@ -1900,6 +1901,12 @@ impl Renderer {
         } else {
             Err(mem::replace(&mut self.renderer_errors, Vec::new()))
         }
+    }
+
+    fn flush(&mut self) {
+        self.ps_line.instance_buffer.reset();
+        self.ps_border_corner.instance_buffer.reset();
+        self.ps_border_edge.instance_buffer.reset();
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
