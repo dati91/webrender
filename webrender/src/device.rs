@@ -227,7 +227,7 @@ pub struct VertexDataImage<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> VertexDataImage<B> {
-    pub fn create(device: &B::Device, memory_types: &Vec<hal::MemoryType>, data_stride: usize, image_width: u32, image_height: u32) -> VertexDataImage<B> {
+    pub fn create(device: &B::Device, memory_types: &[hal::MemoryType], data_stride: usize, image_width: u32, image_height: u32) -> VertexDataImage<B> {
         let image_upload_buffer =
             Buffer::create(
                 device,
@@ -273,7 +273,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         device: &mut B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         image_offset: DeviceUintPoint,
-        image_data: &Vec<T>,
+        image_data: &[T],
     ) -> hal::command::Submit<B, hal::queue::Graphics>
     where
         T: Copy
@@ -334,7 +334,7 @@ pub struct Buffer<B: hal::Backend> {
 impl<B: hal::Backend> Buffer<B> {
     pub fn create(
         device: &B::Device,
-        memory_types: &Vec<hal::MemoryType>,
+        memory_types: &[hal::MemoryType],
         usage: hal::buffer::Usage,
         data_stride: usize,
         data_len: usize,
@@ -367,7 +367,7 @@ impl<B: hal::Backend> Buffer<B> {
         device: &B::Device,
         buffer_offset: u64,
         buffer_width: u64,
-        update_data: &Vec<T>
+        update_data: &[T]
     )
     where T: Copy
     {
@@ -424,7 +424,7 @@ impl<B: hal::Backend> Program<B> {
     pub fn create(
         json: &Value,
         device: &B::Device,
-        memory_types: &Vec<hal::MemoryType>,
+        memory_types: &[hal::MemoryType],
         shader_name: String,
         render_pass: &B::RenderPass,
     ) -> Program<B> {
@@ -644,7 +644,7 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::command::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        clear_values: &Vec<hal::command::ClearValue>,
+        clear_values: &[hal::command::ClearValue],
     ) -> hal::command::Submit<B, hal::queue::Graphics>
     {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer();
@@ -977,7 +977,7 @@ impl<B: hal::Backend> Device<B> {
         Texture { target, width: 0, height: 0,  layer_count: 0, format: ImageFormat::Invalid }
     }
 
-    pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &Vec<[f32; 4]>) {
+    pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
         debug_assert_eq!(gpu_data.len(), 1024);
         self.upload_queue.push(
             self.resource_cache.update_buffer_and_submit_upload(
@@ -989,7 +989,7 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    pub fn update_render_tasks(&mut self, task_data: &Vec<[f32; 12]>) {
+    pub fn update_render_tasks(&mut self, task_data: &[[f32; 12]]) {
         self.upload_queue.push(
             self.render_tasks.update_buffer_and_submit_upload(
                 &mut self.device,
@@ -1000,7 +1000,7 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    pub fn update_node_data(&mut self, node_data: &Vec<[f32; 28]>) {
+    pub fn update_node_data(&mut self, node_data: &[[f32; 28]]) {
         self.upload_queue.push(
             self.node_data.update_buffer_and_submit_upload(
                 &mut self.device,
