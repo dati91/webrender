@@ -2999,19 +2999,20 @@ impl Renderer {
             let cache_draw_target = (cache_texture, readback_layer.0 as i32);
             self.device.bind_draw_target(Some(cache_draw_target), None);
 
-            let mut src = DeviceIntRect::new(
+            /*let mut src = DeviceIntRect::new(
                 source_screen_origin + (backdrop_rect.origin - backdrop_screen_origin),
                 readback_rect.size,
-            );
+            );*/
+            let mut src = backdrop_rect.to_i32();
             let mut dest = readback_rect.to_i32();
 
             // Need to invert the y coordinates and flip the image vertically when
             // reading back from the framebuffer.
-            if render_target.is_none() {
+            /*if render_target.is_none() {
                 src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
                 dest.origin.y += dest.size.height;
                 dest.size.height = -dest.size.height;
-            }
+            }*/
 
             self.device.bind_read_target(render_target);
             self.device.blit_render_target(src, dest);
@@ -3096,11 +3097,6 @@ impl Renderer {
 
             let (source_rect, source_layer) = source.get_target_rect();
             let (dest_rect, _) = dest.get_target_rect();
-
-            if source_rect.size != dest_rect.size {
-                println!("TODO handle_scaling");
-                continue;
-            }
 
             let cache_draw_target = (cache_texture, source_layer.0 as i32);
             self.device
@@ -4139,8 +4135,8 @@ impl Renderer {
                         let projection = Transform3D::ortho(
                             0.0,
                             color.max_size.width as f32,
-                            color.max_size.height as f32,
                             0.0,
+                            color.max_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );
@@ -4541,7 +4537,7 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: true,
+            enable_clear_scissor: false,
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,
