@@ -1172,7 +1172,10 @@ impl LazilyCompiledShader {
 
     fn reset(&mut self) {
         if let Some(ref mut program) = self.program {
-            program.instance_buffer.reset()
+            println!("reset ib");
+            program.instance_buffer.reset();
+            println!("reset lb");
+            program.locals_buffer.reset();
         }
     }
 
@@ -2072,6 +2075,10 @@ impl Renderer {
 
     pub fn swap_buffers(&mut self) {
         self.device.swap_buffers();
+        self.flush();
+        println!("####################");
+        println!("#######FLUSH########");
+        println!("####################");
     }
 
     pub fn get_max_texture_size(&self) -> u32 {
@@ -2599,7 +2606,7 @@ impl Renderer {
                     cpu_frame_id,
                     &mut stats
                 );
-                self.flush();
+                //self.flush();
 
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
                     frame_profiles.push(frame.profile_counters.clone());

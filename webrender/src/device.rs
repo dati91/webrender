@@ -947,6 +947,7 @@ impl<B: hal::Backend> InstanceBuffer<B> {
     )where
         T: Copy,
     {
+        println!("update before o={:?} s={:?}", self.offset, self.size);
         let data_stride = self.buffer.data_stride;
         self.buffer.update(
             device,
@@ -956,10 +957,12 @@ impl<B: hal::Backend> InstanceBuffer<B> {
         );
 
         self.size = instances.len();
-        //self.offset += instances.len();
+        self.offset += self.size;
+        println!("update after o={:?} s={:?}", self.offset, self.size);
     }
 
     pub fn reset(&mut self) {
+        println!("reset ib {:?} {:?}", self.offset, self.size);
         self.size = 0;
         self.offset = 0;
     }
@@ -978,7 +981,7 @@ pub struct Program<B: hal::Backend> {
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
     pub instance_buffer: InstanceBuffer<B>,
-    pub locals_buffer: Buffer<B>,
+    pub locals_buffer: InstanceBuffer<B>,
     shader_name: String,
 }
 
@@ -1159,7 +1162,7 @@ impl<B: hal::Backend> Program<B> {
         );
 
         let locals_buffer_stride = mem::size_of::<Locals>();
-        let locals_buffer_len = locals_buffer_stride;
+        let locals_buffer_len = locals_buffer_stride * 10;
 
         let locals_buffer = Buffer::create(
             device,
@@ -1170,7 +1173,7 @@ impl<B: hal::Backend> Program<B> {
         );
 
         let bindings_map = pipeline_requirements.bindings_map;
-        device.write_descriptor_sets::<_, Range<_>>(vec![
+        /*device.write_descriptor_sets::<_, Range<_>>(vec![
             hal::pso::DescriptorSetWrite {
                 set: &descriptor_set,
                 binding: bindings_map["Locals"],
@@ -1179,7 +1182,7 @@ impl<B: hal::Backend> Program<B> {
                     (&locals_buffer.buffer, 0 .. mem::size_of::<Locals>() as u64),
                 ]),
             },
-        ]);
+        ]);*/
 
         Program {
             bindings_map,
@@ -1190,7 +1193,7 @@ impl<B: hal::Backend> Program<B> {
             pipelines,
             vertex_buffer,
             instance_buffer: InstanceBuffer::new(instance_buffer),
-            locals_buffer,
+            locals_buffer: InstanceBuffer::new(locals_buffer),
             shader_name: String::from(shader_name),
         }
     }
@@ -1225,12 +1228,30 @@ impl<B: hal::Backend> Program<B> {
                 uMode: u_mode,
             },
         ];
-        self.locals_buffer.update(
+        /*self.locals_buffer.update(
             device,
             0,
             (locals_data.len() * locals_buffer_stride) as u64,
             &locals_data,
+        );*/
+        self.locals_buffer.update(
+            device,
+            &locals_data,
         );
+        let buffer_offset = (self.locals_buffer.offset * locals_buffer_stride) as u64;
+        println!("bind_locals buffer_offset={:?}", buffer_offset);
+        println!("bind_locals locals_data={:?}", locals_data);
+        println!("bind_locals self.locals_buffer.buffer.buffer={:?}", self.locals_buffer.buffer.buffer);
+        device.write_descriptor_sets::<_, Range<_>>(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["Locals"],
+                array_offset: 0,
+                write: hal::pso::DescriptorWrite::UniformBuffer(&[
+                    (&self.locals_buffer.buffer.buffer, buffer_offset - locals_buffer_stride as u64 .. buffer_offset),
+                ]),
+            },
+        ]);
     }
 
     pub fn bind_textures(
@@ -1439,9 +1460,9 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            println!("draw {:?} {:?}", self.instance_buffer.offset as u32, self.instance_buffer.size as u32);
-            encoder.draw(0 .. 6, self.instance_buffer.offset as u32 .. (self.instance_buffer.offset + self.instance_buffer.size) as u32);
-            self.instance_buffer.offset += self.instance_buffer.size;
+            println!("draw ib o={:?} s={:?}", self.instance_buffer.offset as u32, self.instance_buffer.size as u32);
+            println!("draw lb o={:?} s={:?}", self.locals_buffer.offset as u32, self.locals_buffer.size as u32);
+            encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
         }
 
         cmd_buffer.finish()

@@ -1,5 +1,6 @@
 == multiply.yaml multiply-ref.yaml
 == multiply-2.yaml multiply-2-ref.yaml
+== multiply-2.yaml multiply-2-ref.yaml
 == difference.yaml difference-ref.yaml
 fuzzy(1,10000) == difference-transparent.yaml difference-transparent-ref.yaml
 == darken.yaml darken-ref.yaml
@@ -21,4 +22,6 @@ fuzzy(1,10000) == difference-transparent.yaml difference-transparent-ref.yaml
 fuzzy(1,2502) == transparent-composite-1.yaml transparent-composite-1-ref.yaml
 fuzzy(1,2502) == transparent-composite-2.yaml transparent-composite-2-ref.yaml
 
-== multi-mix-blend-mode.yaml multi-mix-blend-mode-ref.yaml
+#== multi-mix-blend-mode.yaml multi-mix-blend-mode-ref.yaml
+== multi-mix-blend-mode-ref.yaml multi-mix-blend-mode.yaml
+== multi-mix-blend-mode-ref.yaml multi-mix-blend-mode.yaml
