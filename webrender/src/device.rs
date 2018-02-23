@@ -13,15 +13,13 @@ use rand::{self, Rng};
 use serde;
 use std::collections::HashMap;
 use smallvec::SmallVec;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Add, Range};
 use std::path::PathBuf;
-use std::ptr;
-use std::rc::Rc;
 use std::thread;
 
 use hal;
@@ -31,8 +29,8 @@ use winit;
 // gfx-hal
 use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
 use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
-use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
-use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
+use hal::{Device as BackendDevice, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use hal::{Backbuffer, DescriptorPool, FrameSync, Primitive, SwapchainConfig};
 use hal::format::{ChannelType, Format, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
@@ -53,6 +51,11 @@ pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::AspectFlags::COLOR,
+    levels: 0 .. 1,
+    layers: 0 .. 1,
+};
+const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
+    aspects: hal::format::AspectFlags::DEPTH,
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
@@ -509,13 +512,104 @@ impl<B: hal::Backend> ImageBuffer<B> {
     }
 }
 
-pub struct Image<B: hal::Backend> {
-    pub image_upload_buffer: ImageBuffer<B>,
+pub struct ImageCore<B: hal::Backend> {
     pub image: B::Image,
-    pub image_memory: B::Memory,
-    pub image_view: B::ImageView,
-    pub image_kind: hal::image::Kind,
-    pub image_format: ImageFormat,
+    pub memory: Option<B::Memory>,
+    pub view: B::ImageView,
+    pub subresource_range: hal::image::SubresourceRange,
+    pub state: Cell<hal::image::State>,
+}
+
+impl<B: hal::Backend> ImageCore<B> {
+    fn from_image(
+        device: &B::Device,
+        image: B::Image,
+        format: hal::format::Format,
+        subresource_range: hal::image::SubresourceRange,
+    ) -> Self {
+        let view = device.create_image_view(
+            &image,
+            format,
+            hal::format::Swizzle::NO,
+            subresource_range.clone(),
+        ).unwrap();
+        ImageCore {
+            image,
+            memory: None,
+            view,
+            subresource_range,
+            state: Cell::new((hal::image::Access::empty(), hal::image::ImageLayout::Undefined)),
+        }
+    }
+
+    fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        kind: hal::image::Kind,
+        format: hal::format::Format,
+        usage: hal::image::Usage,
+        subresource_range: hal::image::SubresourceRange,
+    ) -> Self {
+        let image_unbound = device
+            .create_image(kind, 1, format, usage)
+            .unwrap();
+        let requirements = device.get_image_requirements(&image_unbound);
+
+        let mem_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                requirements.type_mask & (1 << id) != 0 &&
+                    mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
+            })
+            .unwrap()
+            .into();
+
+        let memory = device.allocate_memory(mem_type, requirements.size).unwrap();
+        let image = device.bind_image_memory(&memory, 0, image_unbound).unwrap();
+
+        ImageCore {
+            memory: Some(memory),
+            .. Self::from_image(device, image, format, subresource_range)
+        }
+    }
+
+    fn reset(&self) {
+        self.state.set((hal::image::Access::empty(), hal::image::ImageLayout::Undefined));
+    }
+
+    fn deinit(self, device: &B::Device) {
+        device.destroy_image(self.image);
+        device.destroy_image_view(self.view);
+        if let Some(memory) = self.memory {
+            device.free_memory(memory);
+        }
+    }
+
+    fn transit(
+        &self,
+        access: hal::image::Access,
+        layout: hal::image::ImageLayout,
+    ) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == (access, layout) {
+            None
+        } else {
+            self.state.set((access, layout));
+            Some(hal::memory::Barrier::Image {
+                states: src_state .. (access, layout),
+                target: &self.image,
+                range: self.subresource_range.clone(),
+            })
+        }
+    }
+}
+
+pub struct Image<B: hal::Backend> {
+    pub core: ImageCore<B>,
+    pub upload_buffer: ImageBuffer<B>,
+    pub kind: hal::image::Kind,
+    pub format: ImageFormat,
 }
 
 impl<B: hal::Backend> Image<B> {
@@ -540,56 +634,31 @@ impl<B: hal::Backend> Image<B> {
             data_stride,
             (image_width * image_height) as usize,
         );
-        let image_upload_buffer = ImageBuffer::new(upload_buffer);
-        let image_kind = hal::image::Kind::D2Array(
+
+        let kind = hal::image::Kind::D2Array(
             image_width as hal::image::Size,
             image_height as hal::image::Size,
             image_depth as hal::image::Layer,
             hal::image::AaMode::Single,
         );
-        let image_unbound = device
-            .create_image(
-                image_kind,
-                1,
-                format,
-                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
-            )
-            .unwrap(); // TODO: usage
-        let image_req = device.get_image_requirements(&image_unbound);
-
-        let device_type = memory_types
-            .iter()
-            .enumerate()
-            .position(|(id, mem_type)| {
-                image_req.type_mask & (1 << id) != 0
-                    && mem_type
-                    .properties
-                    .contains(hal::memory::Properties::DEVICE_LOCAL)
-            })
-            .unwrap()
-            .into();
-
-        let image_memory = device.allocate_memory(device_type, image_req.size).unwrap();
-
-        let image = device
-            .bind_image_memory(&image_memory, 0, image_unbound)
-            .unwrap();
-        let image_view = device
-            .create_image_view(
-                &image,
-                format,
-                Swizzle::NO,
-                COLOR_RANGE.clone(),
-            )
-            .unwrap();
+        let core = ImageCore::create(
+            device,
+            memory_types,
+            kind,
+            format,
+            hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
+            hal::image::SubresourceRange {
+                aspects: hal::format::AspectFlags::COLOR,
+                levels: 0 .. 1,
+                layers: 0 .. image_depth as _,
+            },
+        );
 
         Image {
-            image_upload_buffer,
-            image,
-            image_memory,
-            image_view,
-            image_kind,
-            image_format,
+            core,
+            upload_buffer: ImageBuffer::new(upload_buffer),
+            kind,
+            format: image_format,
         }
     }
 
@@ -602,36 +671,29 @@ impl<B: hal::Backend> Image<B> {
         image_data: &[u8],
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
     {
-        let (image_width, image_height, _, _) = self.image_kind.get_dimensions();
+        let (image_width, image_height, _, _) = self.kind.get_dimensions();
         let pos = rect.origin;
         let size = rect.size;
-        self.image_upload_buffer.update(device, image_data);
+        self.upload_buffer.update(device, image_data);
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
-        let image_barrier = hal::memory::Barrier::Image {
-            states: (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            )
-                .. (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            ),
-            target: &self.image,
-            range: COLOR_RANGE.clone(),
-        };
-        cmd_buffer.pipeline_barrier(
-            hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
-            &[image_barrier],
-        );
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::TRANSFER_WRITE,
+            hal::image::ImageLayout::TransferDstOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                &[barrier],
+            );
+        }
 
         cmd_buffer.copy_buffer_to_image(
-            &self.image_upload_buffer.buffer.buffer,
-            &self.image,
+            &self.upload_buffer.buffer.buffer,
+            &self.core.image,
             hal::image::ImageLayout::TransferDstOptimal,
             &[
                 hal::command::BufferImageCopy {
-                    buffer_offset: self.image_upload_buffer.offset,
+                    buffer_offset: self.upload_buffer.offset,
                     buffer_width: size.width,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
@@ -653,40 +715,29 @@ impl<B: hal::Backend> Image<B> {
             ],
         );
 
-        let image_barrier = hal::memory::Barrier::Image {
-            states: (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            )
-                .. (
-                hal::image::Access::SHADER_READ,
-                hal::image::ImageLayout::ShaderReadOnlyOptimal,
-            ),
-            target: &self.image,
-            range: COLOR_RANGE.clone(),
-        };
-        cmd_buffer.pipeline_barrier(
-            hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
-            &[image_barrier],
-        );
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::SHADER_READ,
+            hal::image::ImageLayout::ShaderReadOnlyOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                &[barrier],
+            );
+        }
 
-        self.image_upload_buffer.offset += image_data.len() as u64;
+        self.upload_buffer.offset += image_data.len() as u64;
         cmd_buffer.finish()
     }
 
     pub fn deinit(self, device: &B::Device) {
-        self.image_upload_buffer.deinit(device);
-        device.destroy_image(self.image);
-        device.destroy_image_view(self.image_view);
-        device.free_memory(self.image_memory);
+        self.core.deinit(device);
+        self.upload_buffer.deinit(device);
     }
 }
 
 pub struct VertexDataImage<B: hal::Backend> {
+    pub core: ImageCore<B>,
     pub image_upload_buffer: Buffer<B>,
-    pub image: B::Image,
-    pub image_memory: B::Memory,
-    pub image_view: B::ImageView,
     pub image_stride: usize,
     pub mem_stride: usize,
     pub image_width: u32,
@@ -701,6 +752,19 @@ impl<B: hal::Backend> VertexDataImage<B> {
         image_width: u32,
         image_height: u32,
     ) -> Self {
+        let kind = hal::image::Kind::D2(
+            image_width as hal::image::Size,
+            image_height as hal::image::Size,
+            hal::image::AaMode::Single,
+        );
+        let core = ImageCore::create(
+            device,
+            memory_types,
+            kind,
+            hal::format::Format::Rgba32Float,
+            hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+            COLOR_RANGE,
+        );
         let image_upload_buffer = Buffer::create(
             device,
             memory_types,
@@ -708,52 +772,10 @@ impl<B: hal::Backend> VertexDataImage<B> {
             data_stride,
             (image_width * image_height) as usize,
         );
-        let kind = hal::image::Kind::D2(
-            image_width as hal::image::Size,
-            image_height as hal::image::Size,
-            hal::image::AaMode::Single,
-        );
-        let image_unbound = device
-            .create_image(
-                kind,
-                1,
-                hal::format::Format::Rgba32Float,
-                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
-            )
-            .unwrap(); // TODO: usage
-        let image_req = device.get_image_requirements(&image_unbound);
-
-        let device_type = memory_types
-            .iter()
-            .enumerate()
-            .position(|(id, mem_type)| {
-                image_req.type_mask & (1 << id) != 0
-                    && mem_type
-                    .properties
-                    .contains(hal::memory::Properties::DEVICE_LOCAL)
-            })
-            .unwrap()
-            .into();
-
-        let image_memory = device.allocate_memory(device_type, image_req.size).unwrap();
-
-        let image = device
-            .bind_image_memory(&image_memory, 0, image_unbound)
-            .unwrap();
-        let image_view = device
-            .create_image_view(
-                &image,
-                hal::format::Format::Rgba32Float,
-                Swizzle::NO,
-                COLOR_RANGE.clone(),
-            )
-            .unwrap();
 
         VertexDataImage {
+            core,
             image_upload_buffer,
-            image,
-            image_memory,
-            image_view: image_view,
             image_stride: 4usize,              // Rgba
             mem_stride: mem::size_of::<f32>(), // Float
             image_width,
@@ -784,26 +806,19 @@ impl<B: hal::Backend> VertexDataImage<B> {
 
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
-        let image_barrier = hal::memory::Barrier::Image {
-            states: (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            )
-                .. (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            ),
-            target: &self.image,
-            range: COLOR_RANGE.clone(),
-        };
-        cmd_buffer.pipeline_barrier(
-            hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
-            &[image_barrier],
-        );
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::TRANSFER_WRITE,
+            hal::image::ImageLayout::TransferDstOptimal
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                &[barrier],
+            );
+        }
 
         cmd_buffer.copy_buffer_to_image(
             &self.image_upload_buffer.buffer,
-            &self.image,
+            &self.core.image,
             hal::image::ImageLayout::TransferDstOptimal,
             &[
                 hal::command::BufferImageCopy {
@@ -829,30 +844,22 @@ impl<B: hal::Backend> VertexDataImage<B> {
             ],
         );
 
-        let image_barrier = hal::memory::Barrier::Image {
-            states: (
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::ImageLayout::TransferDstOptimal,
-            )
-                .. (
-                hal::image::Access::SHADER_READ,
-                hal::image::ImageLayout::ShaderReadOnlyOptimal,
-            ),
-            target: &self.image,
-            range: COLOR_RANGE.clone(),
-        };
-        cmd_buffer.pipeline_barrier(
-            hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
-            &[image_barrier],
-        );
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::SHADER_READ,
+            hal::image::ImageLayout::ShaderReadOnlyOptimal
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                &[barrier],
+            );
+        }
+
         cmd_buffer.finish()
     }
 
     pub fn deinit(self, device: &B::Device) {
+        self.core.deinit(device);
         self.image_upload_buffer.deinit(device);
-        device.destroy_image(self.image);
-        device.destroy_image_view(self.image_view);
-        device.free_memory(self.image_memory);
     }
 }
 
@@ -860,6 +867,7 @@ pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
     pub data_stride: usize,
+    state: Cell<hal::buffer::State>,
 }
 
 impl<B: hal::Backend> Buffer<B> {
@@ -869,31 +877,31 @@ impl<B: hal::Backend> Buffer<B> {
         usage: hal::buffer::Usage,
         data_stride: usize,
         data_len: usize,
-    ) -> Buffer<B> {
+    ) -> Self {
         let buffer_size = data_stride * data_len;
-        let buffer_type: hal::MemoryTypeId = memory_types
+        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+        let requirements = device.get_buffer_requirements(&unbound_buffer);
+        let mem_type = memory_types
             .iter()
-            .position(|mt| {
+            .enumerate()
+            .position(|(id, mt)| {
+                requirements.type_mask & (1 << id) != 0 &&
                 mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
                 //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
             })
             .unwrap()
             .into();
-        let (memory, buffer) = {
-            let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
-            let buffer_req = device.get_buffer_requirements(&unbound_buffer);
-            let buffer_memory = device
-                .allocate_memory(buffer_type, buffer_req.size)
-                .unwrap();
-            let buffer = device
-                .bind_buffer_memory(&buffer_memory, 0, unbound_buffer)
-                .unwrap();
-            (buffer_memory, buffer)
-        };
+        let memory = device
+            .allocate_memory(mem_type, requirements.size)
+            .unwrap();
+        let buffer = device
+            .bind_buffer_memory(&memory, 0, unbound_buffer)
+            .unwrap();
         Buffer {
             memory,
             buffer,
             data_stride,
+            state: Cell::new(hal::buffer::Access::empty())
         }
     }
 
@@ -906,6 +914,8 @@ impl<B: hal::Backend> Buffer<B> {
     ) where
         T: Copy,
     {
+        //TODO:
+        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
         let mut data = device
             .acquire_mapping_writer::<T>(
                 &self.memory,
@@ -917,6 +927,22 @@ impl<B: hal::Backend> Buffer<B> {
             data[i] = *d;
         }
         device.release_mapping_writer(data);
+    }
+
+    fn transit(
+        &self,
+        access: hal::buffer::Access,
+    ) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == access {
+            None
+        } else {
+            self.state.set(access);
+            Some(hal::memory::Barrier::Buffer {
+                states: src_state .. access,
+                target: &self.buffer,
+            })
+        }
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1278,7 +1304,7 @@ impl<B: hal::Backend> Program<B> {
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::SampledImage(&[
                     (
-                        &device.images[id].image_view,
+                        &device.images[id].core.view,
                         hal::image::ImageLayout::Undefined,
                     ),
                 ])
@@ -1512,7 +1538,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         };
         let image_view = device
             .create_image_view(
-                &image.image,
+                &image.core.image,
                 format,
                 Swizzle::NO,
                 hal::image::SubresourceRange {
@@ -1541,19 +1567,17 @@ impl<B: hal::Backend> Framebuffer<B> {
         }
     }
 
-    pub fn deinit(mut self, device: &B::Device) {
+    pub fn deinit(self, device: &B::Device) {
         device.destroy_framebuffer(self.fbo);
         device.destroy_image_view(self.image_view);
     }
 }
 
-pub struct Depthbuffer<B: hal::Backend> {
-    pub image: B::Image,
-    pub memory: B::Memory,
-    pub image_view: B::ImageView,
+pub struct DepthBuffer<B: hal::Backend> {
+    pub core: ImageCore<B>
 }
 
-impl<B: hal::Backend> Depthbuffer<B> {
+impl<B: hal::Backend> DepthBuffer<B> {
     pub fn new(
         device: &B::Device,
         memory_types: &[hal::MemoryType],
@@ -1561,49 +1585,21 @@ impl<B: hal::Backend> Depthbuffer<B> {
         pixel_height: u16,
         depth_format: hal::format::Format
     ) -> Self {
-        let image_unbound = device.create_image(
+        let core = ImageCore::create(
+            device,
+            memory_types,
             hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
-            1,
             depth_format,
-            hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
-        ).unwrap();
-
-        let depth_mem_reqs = device.get_image_requirements(&image_unbound);
-
-        let mem_type = memory_types
-            .iter()
-            .enumerate()
-            .position(|(id, mem_type)| {
-                depth_mem_reqs.type_mask & (1 << id) != 0 &&
-                    mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
-            })
-            .unwrap()
-            .into();
-
-        let memory = device.allocate_memory(mem_type, depth_mem_reqs.size).unwrap();
-        let image = device.bind_image_memory(&memory, 0, image_unbound).unwrap();
-
-        let image_view = device.create_image_view(
-            &image,
-            depth_format,
-            hal::format::Swizzle::NO,
-            hal::image::SubresourceRange {
-                aspects: hal::format::AspectFlags::DEPTH,
-                levels: 0..1,
-                layers: 0..1,
-            },
-        ).unwrap();
-        Depthbuffer {
-            image,
-            memory,
-            image_view,
+            hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
+            DEPTH_RANGE,
+        );
+        DepthBuffer {
+            core
         }
     }
 
-    pub fn deinit(mut self, device: &B::Device) {
-        device.destroy_image(self.image);
-        device.destroy_image_view(self.image_view);
-        device.free_memory(self.memory);
+    pub fn deinit(self, device: &B::Device) {
+        self.core.deinit(device);
     }
 }
 
@@ -1620,8 +1616,8 @@ pub struct Device<B: hal::Backend, C> {
     pub swap_chain: Box<B::Swapchain>,
     pub render_pass: (B::RenderPass, B::RenderPass),
     pub framebuffers: Vec<B::Framebuffer>,
-    pub frame_images: Vec<(B::Image, B::ImageView)>,
-    pub frame_depth: Depthbuffer<B>,
+    pub frame_images: Vec<ImageCore<B>>,
+    pub frame_depth: DepthBuffer<B>,
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1638,7 +1634,7 @@ pub struct Device<B: hal::Backend, C> {
     // device state
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
-    rbos: FastHashMap<RBOId, Depthbuffer<B>>,
+    rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     bound_textures: [u32; 16],
     bound_sampler: [TextureFilter; 16],
     bound_program: u32,
@@ -1799,7 +1795,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             )
         };
 
-        let frame_depth = Depthbuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
+        let frame_depth = DepthBuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers) = match backbuffer {
@@ -1809,29 +1805,25 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     height: pixel_height as _,
                     depth: 1,
                 };
-                let pairs = images
+                let cores = images
                     .into_iter()
                     .map(|image| {
-                        let rtv = device
-                            .create_image_view(
-                                &image,
-                                surface_format,
-                                Swizzle::NO,
-                                COLOR_RANGE.clone(),
-                            )
-                            .unwrap();
-                        (image, rtv)
+                        ImageCore::from_image(&device, image, surface_format, COLOR_RANGE.clone())
                     })
                     .collect::<Vec<_>>();
-                let fbos = pairs
+                let fbos = cores
                     .iter()
-                    .map(|&(_, ref rtv)| {
+                    .map(|core| {
                         device
-                            .create_framebuffer(&render_pass.1, vec![rtv, &frame_depth.image_view], extent)
+                            .create_framebuffer(
+                                &render_pass.1,
+                                vec![&core.view, &frame_depth.core.view],
+                                extent,
+                            )
                             .unwrap()
                     })
                     .collect();
-                (pairs, fbos)
+                (cores, fbos)
             }
             Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
         };
@@ -2005,13 +1997,13 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         );
         program.init_vertex_data(
             &self.device,
-            &self.resource_cache.image_view,
+            &self.resource_cache.core.view,
             &self.sampler_nearest,
-            &self.node_data.image_view,
+            &self.node_data.core.view,
             &self.sampler_nearest,
-            &self.render_tasks.image_view,
+            &self.render_tasks.core.view,
             &self.sampler_nearest,
-            &self.local_clip_rects.image_view,
+            &self.local_clip_rects.core.view,
             &self.sampler_nearest,
         );
 
@@ -2022,7 +2014,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let dither_text_id = self.dither_texture.as_ref().unwrap().id;
             program.init_dither_data(
                 &self.device,
-                &self.images[&dither_text_id].image_view,
+                &self.images[&dither_text_id].core.view,
                 &self.sampler_nearest,
             );
         }
@@ -2116,7 +2108,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //blend_mode: &BlendMode,
         //enable_depth_write: bool
     ) {
-        let ref fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             &self.fbos[&self.bound_draw_fbo].fbo
         } else {
             &self.framebuffers[self.current_frame_id]
@@ -2170,7 +2162,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn reset_image_buffer_offsets(&mut self) {
         for img in self.images.values_mut() {
-            img.image_upload_buffer.reset();
+            img.upload_buffer.reset();
         }
     }
 
@@ -2266,6 +2258,24 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let fbo_id = texture_and_layer.map_or(DEFAULT_DRAW_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
+
+        if let Some((texture, _layer)) = texture_and_layer {
+            let mut barriers = Vec::new();
+            let rbos = &self.rbos;
+            //TODO: transit only specific layer
+            barriers.extend(self.images[&texture.id].core.transit(
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+            ));
+            barriers.extend(texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
+                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+            )));
+
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::COLOR_ATTACHMENT_OUTPUT, &barriers);
+            self.upload_queue.push(cmd_buffer.finish())
+        }
 
         self.bind_draw_target_impl(fbo_id);
 
@@ -2478,7 +2488,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 old_rbo.deinit(&self.device);
             }
             if rt_info.has_depth {
-                let rbo = Depthbuffer::new(
+                let rbo = DepthBuffer::new(
                     &self.device,
                     &self.memory_types,
                     texture.width as u16,
@@ -2496,7 +2506,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         for i in 0..texture.layer_count as u16 {
             let (rbo_id, depth) = match texture.depth_rb {
-                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].image_view)),
+                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
                 None => (RBOId(0), None)
             };
             let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(),depth);
@@ -2533,28 +2543,37 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
-            (&img.image, layer)
+            (&img.core, layer)
         } else {
-            (&self.frame_images[self.current_frame_id].0, 0)
+            (&self.frame_images[self.current_frame_id], 0)
         };
 
         let (dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
-            (&img.image, layer)
+            (&img.core, layer)
         } else {
-            (&self.frame_images[self.current_frame_id].0, 0)
+            (&self.frame_images[self.current_frame_id], 0)
         };
 
         let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+
+        {
+            let mut barriers = Vec::new();
+            barriers.extend(src_img.transit(hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal));
+            barriers.extend(dest_img.transit(hal::image::Access::TRANSFER_WRITE, hal::image::ImageLayout::TransferDstOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &barriers);
+            }
+        }
         // TODO remove this cfg if other platforms are supported
         if cfg!(feature = "vulkan") && src_rect.size != dest_rect.size {
             cmd_buffer.blit_image(
-                src_img,
-                hal::image::ImageLayout::ColorAttachmentOptimal,
-                dest_img,
-                hal::image::ImageLayout::ColorAttachmentOptimal,
+                &src_img.image,
+                hal::image::ImageLayout::TransferSrcOptimal,
+                &dest_img.image,
+                hal::image::ImageLayout::TransferDstOptimal,
                 hal::command::BlitFilter::Linear,
                 &[
                     hal::command::ImageBlit {
@@ -2591,10 +2610,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             );
         } else {
             cmd_buffer.copy_image(
-                src_img,
-                hal::image::ImageLayout::ColorAttachmentOptimal,
-                dest_img,
-                hal::image::ImageLayout::ColorAttachmentOptimal,
+                &src_img.image,
+                hal::image::ImageLayout::TransferSrcOptimal,
+                &dest_img.image,
+                hal::image::ImageLayout::TransferDstOptimal,
                 &[
                     hal::command::ImageCopy {
                         aspect_mask: hal::format::AspectFlags::COLOR,
@@ -2760,7 +2779,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
-        let image = &self.frame_images[(self.current_frame_id + 1) % self.framebuffers.len()].0;
+        let image = &self.frame_images[(self.current_frame_id + 1) % self.framebuffers.len()];
         let download_buffer: Buffer<B> = Buffer::create(
             &self.device,
             &self.memory_types,
@@ -2771,17 +2790,17 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         let copy_submit = {
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-            let image_barrier = hal::memory::Barrier::Image {
-                states: (hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal) ..
-                    (hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal),
-                target: image,
-                range: COLOR_RANGE.clone(),
-            };
-            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &[image_barrier]);
+            let mut barriers = Vec::new();
+
+            barriers.extend(download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
+            barriers.extend(image.transit(hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &barriers);
+            }
 
             let buffer_width = rect.size.width * bytes_per_pixel as u32;
             cmd_buffer.copy_image_to_buffer(
-                &image,
+                &image.image,
                 hal::image::ImageLayout::TransferSrcOptimal,
                 &download_buffer.buffer,
                 &[hal::command::BufferImageCopy {
@@ -2804,13 +2823,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         depth: 1 as _,
                     },
                 }]);
-            let image_barrier = hal::memory::Barrier::Image {
-                states: (hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal) ..
-                    (hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal),
-                target: image,
-                range: COLOR_RANGE.clone(),
-            };
-            cmd_buffer.pipeline_barrier(PipelineStage::TRANSFER .. PipelineStage::BOTTOM_OF_PIPE, &[image_barrier]);
             cmd_buffer.finish()
         };
 
@@ -2980,20 +2992,32 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
             let dimg = if depth.is_some() {
-                Some(&self.rbos[&fbo.rbo].image)
+                Some(&self.rbos[&fbo.rbo].core)
             } else {
                 None
             };
             let layer = fbo.layer_index;
-            (&img.image, layer, dimg)
+            (&img.core, layer, dimg)
         } else {
-            (&self.frame_images[self.current_frame_id].0, 0, Some(&self.frame_depth.image))
+            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.core))
         };
 
+        //Note: this function is assumed to be called within an active FBO
+        // thus, we bring back the targets into renderable state
+
         if let Some(color) = color {
+            if let Some(barrier) = img.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                    &[barrier],
+                );
+            }
             cmd_buffer.clear_color_image(
-                img,
-                hal::image::ImageLayout::ColorAttachmentOptimal,
+                &img.image,
+                hal::image::ImageLayout::TransferDstOptimal,
                 hal::image::SubresourceRange {
                     aspects: hal::format::AspectFlags::COLOR,
                     levels: 0 .. 1,
@@ -3001,20 +3025,47 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 },
                 hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
             );
+            if let Some(barrier) = img.transit(
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    &[barrier],
+                );
+            }
         }
 
-        if let Some(depth) = depth {
+        if let (Some(depth), Some(dimg)) = (depth, dimg) {
             assert_ne!(self.current_depth_test, DepthTest::Off);
+            if let Some(barrier) = dimg.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                    &[barrier],
+                );
+            }
             cmd_buffer.clear_depth_stencil_image(
-                dimg.unwrap(),
-                hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+                &dimg.image,
+                hal::image::ImageLayout::TransferDstOptimal,
                 hal::image::SubresourceRange {
-                            aspects: hal::format::AspectFlags::DEPTH,
-                            levels: 0 .. 1,
-                            layers: 0 .. 1,
-                        },
+                    aspects: hal::format::AspectFlags::DEPTH,
+                    levels: 0 .. 1,
+                    layers: 0 .. 1,
+                },
                 hal::command::ClearDepthStencil(depth, 0)
             );
+            if let Some(barrier) = dimg.transit(
+                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    &[barrier],
+                );
+            }
         }
         self.upload_queue.push(cmd_buffer.finish());
     }
@@ -3103,6 +3154,21 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn swap_buffers(&mut self) {
+        {
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            let image = &self.frame_images[self.current_frame_id];
+            if let Some(barrier) = image.transit(
+                hal::image::Access::empty(),
+                hal::image::ImageLayout::Present,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    &[barrier],
+                );
+            }
+            self.upload_queue.push(cmd_buffer.finish());
+        }
+
         let mut frame_semaphore = self.device.create_semaphore();
         let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
@@ -3144,9 +3210,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
         }
-        for (image, rtv) in self.frame_images {
-            self.device.destroy_image_view(rtv);
-            self.device.destroy_image(image);
+        for image in self.frame_images {
+            image.deinit(&self.device);
         }
         for (_, image) in self.images {
             image.deinit(&self.device);
