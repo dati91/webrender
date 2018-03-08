@@ -645,7 +645,7 @@ impl<B: hal::Backend> Image<B> {
             memory_types,
             kind,
             format,
-            hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
+            hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             hal::image::SubresourceRange {
                 aspects: hal::format::AspectFlags::COLOR,
                 levels: 0 .. 1,
