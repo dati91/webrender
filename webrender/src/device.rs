@@ -423,7 +423,7 @@ const SUBPIXEL_PASS0: BlendState = BlendState::On {
     },
     alpha: BlendOp::Add {
         src: Factor::Zero,
-        dst: Factor::OneMinusSrcColor,
+        dst: Factor::OneMinusSrcAlpha,
     },
 };
 
@@ -478,8 +478,8 @@ const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
         dst: Factor::OneMinusSrcColor,
     },
     alpha: BlendOp::Add {
-        src: Factor::ConstColor,
-        dst: Factor::OneMinusSrcColor,
+        src: Factor::ConstAlpha,
+        dst: Factor::OneMinusSrcAlpha,
     },
 };
 
@@ -490,7 +490,7 @@ const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
     },
     alpha: BlendOp::Add {
         src: Factor::One,
-        dst: Factor::OneMinusSrc1Color,
+        dst: Factor::OneMinusSrc1Alpha,
     },
 };
 
