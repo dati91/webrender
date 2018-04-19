@@ -2869,8 +2869,13 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 );
             }
         }
-        // TODO remove the first condition if other platforms are supported
-        if self.api_capabilities.contains(ApiCapabilities::BLITTING) && src_rect.size != dest_rect.size {
+
+        if src_rect.size != dest_rect.size {
+            // TODO remove this if other platforms are supported
+            if !self.api_capabilities.contains(ApiCapabilities::BLITTING) {
+                warn!("Blitting is not supported!");
+                return;
+            }
             cmd_buffer.blit_image(
                 &src_img.image,
                 hal::image::Layout::TransferSrcOptimal,
