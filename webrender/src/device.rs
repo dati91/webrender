@@ -556,12 +556,13 @@ impl<B: hal::Backend> ImageCore<B> {
         memory_types: &[hal::MemoryType],
         kind: hal::image::Kind,
         view_kind: hal::image::ViewKind,
+        mip_levels: hal::image::Level,
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
     ) -> Self {
         let image_unbound = device
-            .create_image(kind, 1, format, hal::image::Tiling::Optimal, usage, hal::image::StorageFlags::empty())
+            .create_image(kind, mip_levels, format, hal::image::Tiling::Optimal, usage, hal::image::StorageFlags::empty())
             .unwrap();
         let requirements = device.get_image_requirements(&image_unbound);
 
@@ -631,6 +632,7 @@ impl<B: hal::Backend> Image<B> {
         image_height: u32,
         image_depth: i32,
         view_kind: hal::image::ViewKind,
+        mip_levels: hal::image::Level,
         pitch_alignment: usize,
     ) -> Self {
         let format = match image_format {
@@ -660,11 +662,12 @@ impl<B: hal::Backend> Image<B> {
             memory_types,
             kind,
             view_kind,
+            mip_levels,
             format,
             hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
-                levels: 0 .. 1,
+                levels: 0 .. mip_levels,
                 layers: 0 .. image_depth as _,
             },
         );
@@ -1527,6 +1530,7 @@ impl<B: hal::Backend> DepthBuffer<B> {
             memory_types,
             hal::image::Kind::D2(pixel_width, pixel_height, 1, 1),
             hal::image::ViewKind::D2,
+            1,
             depth_format,
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
             DEPTH_RANGE,
@@ -2403,9 +2407,10 @@ impl<B: hal::Backend> Device<B> {
             self.free_image(texture);
         }
         assert_eq!(self.images.contains_key(&texture.id), false);
-        let view_kind = match texture.filter {
-            TextureFilter::Nearest => hal::image::ViewKind::D2,
-            TextureFilter::Linear | TextureFilter::Trilinear  => hal::image::ViewKind::D2Array,
+        let (view_kind, mip_levels) = match texture.filter {
+            TextureFilter::Nearest => (hal::image::ViewKind::D2, 1),
+            TextureFilter::Linear => (hal::image::ViewKind::D2Array, 1),
+            TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1),
         };
         let img = Image::new(
             &self.device,
@@ -2415,6 +2420,7 @@ impl<B: hal::Backend> Device<B> {
             texture.height,
             texture.layer_count,
             view_kind,
+            mip_levels,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
@@ -2484,7 +2490,102 @@ impl<B: hal::Backend> Device<B> {
                             (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                         )
                 );
+            if texture.filter == TextureFilter::Trilinear {
+                self.generate_mipmaps(texture);
+            }
         }
+    }
+
+    fn generate_mipmaps(&mut self, texture: &Texture) {
+        if !self.api_capabilities.contains(ApiCapabilities::BLITTING) {
+            warn!("Blitting is not supported!");
+            return;
+        }
+
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+
+        let image = self.images
+            .get_mut(&texture.id)
+            .expect("Texture not found.");
+        if let Some(barrier) = image.core.transit(
+            hal::image::Access::TRANSFER_READ | hal::image::Access::TRANSFER_WRITE,
+            hal::image::Layout::TransferSrcOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        let mut mip_width = texture.width;
+        let mut mip_height = texture.height;
+
+        let mut half_mip_width =  mip_width / 2;
+        let mut half_mip_height =  mip_height / 2;
+
+        for index in 1 .. image.kind.num_levels() {
+            cmd_buffer.blit_image(
+                &image.core.image,
+                hal::image::Layout::TransferSrcOptimal,
+                &image.core.image,
+                hal::image::Layout::TransferDstOptimal,
+                hal::image::Filter::Linear,
+                &[
+                    hal::command::ImageBlit {
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: index - 1,
+                            layers: 0 .. 1,
+                        },
+                        src_bounds: hal::image::Offset {
+                            x: 0,
+                            y: 0,
+                            z: 0,
+                        } .. hal::image::Offset {
+                            x: mip_width as i32,
+                            y: mip_height as i32,
+                            z: 1,
+                        },
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: index,
+                            layers: 0 .. 1,
+                        },
+                        dst_bounds: hal::image::Offset {
+                            x: 0 as i32,
+                            y: 0 as i32,
+                            z: 0,
+                        } .. hal::image::Offset {
+                            x: half_mip_width as i32,
+                            y: half_mip_height as i32,
+                            z: 1,
+                        },
+                    }
+                ],
+            );
+            mip_width = half_mip_width;
+            if half_mip_width > 1 {
+                half_mip_width /= 2;
+            }
+            mip_height = half_mip_height;
+            if half_mip_height > 1 {
+                half_mip_height /= 2;
+            }
+        }
+
+        if let Some(barrier) = image.core.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
@@ -2720,6 +2821,9 @@ impl<B: hal::Backend> Device<B> {
                         (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                     )
             );
+        if texture.filter == TextureFilter::Trilinear {
+            self.generate_mipmaps(texture);
+        }
     }
 
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
