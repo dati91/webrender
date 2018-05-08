@@ -583,9 +583,9 @@ impl<B: hal::Backend> ImageCore<B> {
     }
 
     fn deinit(self, device: &B::Device) {
-        device.destroy_image(self.image);
         device.destroy_image_view(self.view);
         if let Some(memory) = self.memory {
+            device.destroy_image(self.image);
             device.free_memory(memory);
         }
     }
@@ -1650,7 +1650,7 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: hal::CommandPool<B, hal::Graphics>,
-    pub swap_chain: Box<B::Swapchain>,
+    pub swap_chain: B::Swapchain,
     pub render_pass: RenderPass<B>,
     pub framebuffers: Vec<B::Framebuffer>,
     pub framebuffers_depth: Vec<B::Framebuffer>,
@@ -1957,7 +1957,7 @@ impl<B: hal::Backend> Device<B> {
             depth_format,
             queue_group,
             command_pool,
-            swap_chain: Box::new(swap_chain),
+            swap_chain,
             render_pass,
             framebuffers,
             framebuffers_depth,
@@ -3447,24 +3447,33 @@ impl<B: hal::Backend> Device<B> {
         if let Some(mut texture) = self.dither_texture {
             texture.id = 0;
         }
-        self.device
-            .destroy_command_pool(self.command_pool.into_raw());
-        self.render_pass.deinit(&self.device);
-        for framebuffer in self.framebuffers {
-            self.device.destroy_framebuffer(framebuffer);
-        }
+        self.device.destroy_command_pool(self.command_pool.into_raw());
         for image in self.frame_images {
             image.deinit(&self.device);
-        }
-        for (_, program) in self.programs {
-            program.deinit(&self.device)
         }
         for (_, image) in self.images {
             image.deinit(&self.device);
         }
+        for (_, rbo) in self.fbos {
+            rbo.deinit(&self.device);
+        }
         for (_, rbo) in self.rbos {
             rbo.deinit(&self.device);
         }
+        for framebuffer in self.framebuffers {
+            self.device.destroy_framebuffer(framebuffer);
+        }
+        for framebuffer_depth in self.framebuffers_depth {
+            self.device.destroy_framebuffer(framebuffer_depth);
+        }
+        self.frame_depth.deinit(&self.device);
+        self.device.destroy_sampler(self.sampler_linear);
+        self.device.destroy_sampler(self.sampler_nearest);
+        for (_, program) in self.programs {
+            program.deinit(&self.device)
+        }
+        self.render_pass.deinit(&self.device);
+        self.device.destroy_swapchain(self.swap_chain);
     }
 }
 
