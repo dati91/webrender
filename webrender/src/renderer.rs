@@ -2541,6 +2541,10 @@ impl<B: hal::Backend> Renderer<B> {
     )
         where T: PrimitiveType
     {
+        if data.is_empty() {
+            return;
+        }
+
         for i in 0 .. textures.colors.len() {
             self.texture_resolver.bind(
                 &textures.colors[i],
