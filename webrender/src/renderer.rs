@@ -3023,6 +3023,7 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
                     self.device.set_uniforms(projection);
+                    self.device.bind_textures();
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                     // are all set up from the previous draw_instanced_batch call,
@@ -3033,6 +3034,7 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
                     self.device.set_uniforms(projection);
+                    self.device.bind_textures();
 
                     self.device.draw();
 
