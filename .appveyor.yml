@@ -17,3 +17,6 @@ build: false
 
 test_script:
   - cargo test --verbose
+  - cd wrench
+  - cargo run --features=dx12 reftest
+  - cargo run --features=vulkan reftest
