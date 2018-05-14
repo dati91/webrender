@@ -392,7 +392,7 @@ pub(crate) enum TextureSampler {
     ResourceCache,
     ClipScrollNodes,
     RenderTasks,
-    _Dither,
+    Dither,
     // A special sampler that is bound to the A8 output of
     // the *first* pass. Items rendered in this target are
     // available as inputs to tasks in any subsequent pass.
@@ -424,7 +424,7 @@ impl Into<TextureSlot> for TextureSampler {
             TextureSampler::ResourceCache => TextureSlot(5),
             TextureSampler::ClipScrollNodes => TextureSlot(6),
             TextureSampler::RenderTasks => TextureSlot(7),
-            TextureSampler::_Dither => TextureSlot(8),
+            TextureSampler::Dither => TextureSlot(8),
             TextureSampler::SharedCacheA8 => TextureSlot(9),
             TextureSampler::LocalClipRects => TextureSlot(10),
         }
@@ -1432,7 +1432,7 @@ pub struct Renderer<B: hal::Backend> {
     // A PBO used to do asynchronous texture cache uploads.
     //texture_cache_upload_pbo: PBO,
 
-    //dither_matrix_texture: Option<Texture>,
+    dither_matrix_texture: Option<Texture>,
 
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
@@ -1563,6 +1563,90 @@ impl<B: hal::Backend> Renderer<B> {
         let shaders = Shaders::new(&mut device, /*gl_type,*/ &options)?;
 
         let backend_profile_counters = BackendProfileCounters::new();
+
+        let dither_matrix_texture = if options.enable_dithering {
+            let dither_matrix: [u8; 64] = [
+                42,
+                26,
+                38,
+                22,
+                41,
+                25,
+                37,
+                21,
+                10,
+                58,
+                06,
+                54,
+                09,
+                57,
+                05,
+                53,
+                34,
+                18,
+                46,
+                30,
+                33,
+                17,
+                45,
+                29,
+                02,
+                50,
+                14,
+                62,
+                01,
+                49,
+                13,
+                61,
+                40,
+                24,
+                36,
+                20,
+                43,
+                27,
+                39,
+                23,
+                08,
+                56,
+                04,
+                52,
+                11,
+                59,
+                07,
+                55,
+                32,
+                16,
+                44,
+                28,
+                35,
+                19,
+                47,
+                31,
+                00,
+                48,
+                12,
+                60,
+                03,
+                51,
+                15,
+                63
+            ];
+            let mut texture = device
+                .create_texture(TextureTarget::Default, ImageFormat::R8);
+            device.init_texture(
+                &mut texture,
+                8,
+                8,
+                TextureFilter::Nearest,
+                None,
+                1,
+                Some(&dither_matrix),
+            );
+
+            Some(texture)
+        } else {
+            None
+        };
 
         let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(/*&mut device,
                                                             &prim_vao,
@@ -1730,7 +1814,7 @@ impl<B: hal::Backend> Renderer<B> {
             local_clip_rects_texture,
             render_task_texture,
             pipeline_info: PipelineInfo::default(),
-            //dither_matrix_texture,
+            dither_matrix_texture,
             external_image_handler: None,
             output_image_handler: None,
             output_targets: FastHashMap::default(),
@@ -2546,12 +2630,12 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
-        self.device.bind_textures();
-
         // TODO: this probably isn't the best place for this.
-        /*if let Some(ref texture) = self.dither_matrix_texture {
+        if let Some(ref texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
-        }*/
+        }
+
+        self.device.bind_textures();
 
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
@@ -3853,9 +3937,9 @@ impl<B: hal::Backend> Renderer<B> {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
         self.gpu_cache_texture.deinit(&mut self.device);
-        /*if let Some(dither_matrix_texture) = self.dither_matrix_texture {
+        if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
-        }*/
+        }
         self.node_data_texture.deinit(&mut self.device);
         self.local_clip_rects_texture.deinit(&mut self.device);
         self.render_task_texture.deinit(&mut self.device);

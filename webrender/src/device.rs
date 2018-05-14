@@ -1410,30 +1410,6 @@ impl<B: hal::Backend> Program<B> {
         self.bind_textures(device);
     }*/
 
-    fn init_dither_data<'a>(
-        &mut self,
-        device: &B::Device,
-        dither: &B::ImageView,
-        dither_sampler: &B::Sampler,
-    ) {
-        device.write_descriptor_sets(vec![
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["tDither"],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(dither, hal::image::Layout::ShaderReadOnlyOptimal)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["sDither"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Sampler(dither_sampler)),
-            },
-        ]);
-    }
-
     pub fn submit(
         &mut self,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
@@ -1669,7 +1645,6 @@ pub struct Device<B: hal::Backend> {
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    dither_texture: Option<Texture>,
     pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
     current_blend_state: BlendState,
@@ -1977,7 +1952,6 @@ impl<B: hal::Backend> Device<B> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            dither_texture: None,
             upload_queue: Vec::new(),
             current_frame_id: 0,
             current_blend_state: BlendState::Off,
@@ -2067,7 +2041,7 @@ impl<B: hal::Backend> Device<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
     ) -> ProgramId {
-        let mut program = Program::create(
+        let program = Program::create(
             pipeline_requirements,
             &self.device,
             &self.memory_types,
@@ -2076,101 +2050,9 @@ impl<B: hal::Backend> Device<B> {
             &self.render_pass,
         );
 
-        if shader_name.contains("dithering") {
-            if self.dither_texture.is_none() {
-                self.dither_texture = Some(self.create_dither_texture());
-            }
-            let dither_text_id = self.dither_texture.as_ref().unwrap().id;
-            program.init_dither_data(
-                &self.device,
-                &self.images[&dither_text_id].core.view,
-                &self.sampler_nearest,
-            );
-        }
         let id = self.generate_program_id();
         self.programs.insert(id, program);
         id
-    }
-
-    fn create_dither_texture(&mut self) -> Texture {
-        let dither_matrix: [u8; 64] = [
-            42,
-            26,
-            38,
-            22,
-            41,
-            25,
-            37,
-            21,
-            10,
-            58,
-            06,
-            54,
-            09,
-            57,
-            05,
-            53,
-            34,
-            18,
-            46,
-            30,
-            33,
-            17,
-            45,
-            29,
-            02,
-            50,
-            14,
-            62,
-            01,
-            49,
-            13,
-            61,
-            40,
-            24,
-            36,
-            20,
-            43,
-            27,
-            39,
-            23,
-            08,
-            56,
-            04,
-            52,
-            11,
-            59,
-            07,
-            55,
-            32,
-            16,
-            44,
-            28,
-            35,
-            19,
-            47,
-            31,
-            00,
-            48,
-            12,
-            60,
-            03,
-            51,
-            15,
-            63
-        ];
-
-        let mut texture = self.create_texture(TextureTarget::Default,ImageFormat::R8);
-        self.init_texture::<u8>(
-            &mut texture,
-            8,
-            8,
-            TextureFilter::Nearest,
-            None,
-            1,
-            Some(&dither_matrix),
-        );
-        texture
     }
 
     pub fn bind_program(&mut self, program_id: ProgramId) {
@@ -2184,7 +2066,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const SAMPLERS: [(usize, &'static str); 10] = [
+        const SAMPLERS: [(usize, &'static str); 11] = [
             (0, "Color0"),
             (1, "Color1"),
             (2, "Color2"),
@@ -2193,6 +2075,7 @@ impl<B: hal::Backend> Device<B> {
             (5, "ResourceCache"),
             (6, "ClipScrollNodes"),
             (7, "RenderTasks"),
+            (8, "Dither"),
             (9, "SharedCacheA8"),
             (10, "LocalClipRects")
         ];
@@ -3419,9 +3302,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn deinit(self) {
-        if let Some(mut texture) = self.dither_texture {
-            texture.id = 0;
-        }
         self.device.destroy_command_pool(self.command_pool.into_raw());
         for image in self.frame_images {
             image.deinit(&self.device);
