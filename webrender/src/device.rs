@@ -9,6 +9,7 @@ use api::TextureTarget;
 use api::ImageDescriptor;
 use euclid::Transform3D;
 //use gleam::gl;
+use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
 use std::cell::Cell;
@@ -158,7 +159,7 @@ pub enum TextureFilter {
     Trilinear,
 }
 
-/*#[derive(Debug)]
+#[derive(Debug)]
 pub enum VertexAttributeKind {
     F32,
     #[cfg(feature = "debug_renderer")]
@@ -181,10 +182,95 @@ pub struct VertexDescriptor {
     pub instance_attributes: &'static [VertexAttribute],
 }
 
+pub trait PrimitiveType {
+    type Primitive: Clone + Copy;
+    fn to_primitive_type(&self) -> Self::Primitive;
+}
+
+
+impl PrimitiveType for gpu_types::BlurInstance {
+    type Primitive = BlurInstance;
+    fn to_primitive_type(&self) -> BlurInstance {
+        BlurInstance {
+            aData0: [0,0,0,0],
+            aData1: [0,0,0,0],
+            aBlurRenderTaskAddress: self.task_address.0 as i32,
+            aBlurSourceTaskAddress: self.src_task_address.0 as i32,
+            aBlurDirection: self.blur_direction as i32,
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::ClipMaskInstance {
+    type Primitive = ClipMaskInstance;
+    fn to_primitive_type(&self) -> ClipMaskInstance {
+        ClipMaskInstance {
+            aClipRenderTaskAddress: self.render_task_address.0 as i32,
+            aScrollNodeId: self.scroll_node_data_index.0 as i32,
+            aClipSegment: self.segment,
+            aClipDataResourceAddress: [
+                self.clip_data_address.u as i32,
+                self.clip_data_address.v as i32,
+                self.resource_address.u as i32,
+                self.resource_address.v as i32,
+            ],
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::ClipMaskBorderCornerDotDash {
+    type Primitive = ClipMaskBorderCornerDotDash;
+    fn to_primitive_type(&self) -> ClipMaskBorderCornerDotDash {
+        ClipMaskBorderCornerDotDash {
+            aClipRenderTaskAddress: self.clip_mask_instance.render_task_address.0 as i32,
+            aScrollNodeId: self.clip_mask_instance.scroll_node_data_index.0 as i32,
+            aClipSegment: self.clip_mask_instance.segment,
+            aClipDataResourceAddress: [
+                self.clip_mask_instance.clip_data_address.u as i32,
+                self.clip_mask_instance.clip_data_address.v as i32,
+                self.clip_mask_instance.resource_address.u as i32,
+                self.clip_mask_instance.resource_address.v as i32,
+            ],
+            aDashOrDot0: [
+                self.dot_dash_data[0],
+                self.dot_dash_data[1],
+                self.dot_dash_data[2],
+                self.dot_dash_data[3],
+            ],
+            aDashOrDot1: [
+                self.dot_dash_data[4],
+                self.dot_dash_data[5],
+                self.dot_dash_data[6],
+                self.dot_dash_data[7],
+            ]
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::PrimitiveInstance {
+    type Primitive = PrimitiveInstance;
+    fn to_primitive_type(&self) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [
+                self.data[0],
+                self.data[1],
+                self.data[2],
+                self.data[3],
+            ],
+            aData1: [
+                self.data[4],
+                self.data[5],
+                self.data[6],
+                self.data[7],
+            ],
+        }
+    }
+}
+
 enum FBOTarget {
     Read,
     Draw,
-}*/
+}
 
 /// Method of uploading texel data from CPU to GPU.
 #[derive(Debug, Clone)]
@@ -303,11 +389,27 @@ impl Drop for Texture {
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct ProgramId(u32);
 
+pub struct PBO;
+pub struct VAO;
+
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct FBOId(u32);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct RBOId(u32);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct VBOId(u32);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+struct IBOId(u32);
+
+#[derive(Debug, Copy, Clone)]
+pub enum VertexUsageHint {
+    Static,
+    Dynamic,
+    Stream,
+}
 
 #[cfg(feature = "debug_renderer")]
 pub struct Capabilities {
@@ -2856,10 +2958,17 @@ impl<B: hal::Backend> Device<B> {
         self.program_mode_id = mode;
     }
 
+    pub fn create_pbo(&mut self) -> PBO {
+        PBO { }
+    }
+
+    pub fn delete_pbo(&mut self, _pbo: PBO) {
+    }
+
     pub fn upload_texture<'a>(
         &'a mut self,
         texture: &'a Texture,
-        //pbo: &PBO,
+        _pbo: &PBO,
         _upload_count: usize,
     ) -> TextureUploader<'a, B> {
         debug_assert!(self.inside_frame);
@@ -3031,6 +3140,65 @@ impl<B: hal::Backend> Device<B> {
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
         self.attach_read_texture_raw(texture.id, texture._target, layer_id)
+    }
+
+    pub fn bind_vao(&mut self, _vao: &VAO) { }
+
+
+    fn create_vao_with_vbos(
+        &mut self,
+        _descriptor: &VertexDescriptor,
+        _main_vbo_id: VBOId,
+        _instance_vbo_id: VBOId,
+        _ibo_id: IBOId,
+        _owns_vertices_and_indices: bool,
+    ) -> VAO {
+        VAO { }
+    }
+
+    pub fn create_vao(&mut self, _descriptor: &VertexDescriptor) -> VAO {
+        VAO { }
+    }
+
+    pub fn delete_vao(&mut self, _vao: VAO) { }
+
+    pub fn create_vao_with_new_instances(
+        &mut self,
+        _descriptor: &VertexDescriptor,
+        _base_vao: &VAO,
+    ) -> VAO {
+        VAO { }
+    }
+
+    pub fn update_vao_main_vertices<V>(
+        &mut self,
+        _vao: &VAO,
+        _vertices: &[V],
+        _usage_hint: VertexUsageHint,
+    ) { }
+
+    pub fn update_vao_instances<V>(
+        &mut self,
+        _vao: &VAO,
+        instances: &[V],
+        _usage_hint: VertexUsageHint,
+    )
+        where V: PrimitiveType
+    {
+        let data = instances.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<V::Primitive>>();
+        self.update_instances(&data);
+    }
+
+    pub fn update_vao_indices<I>(&mut self, _vao: &VAO, _indices: &[I], _usage_hint: VertexUsageHint) { }
+
+    pub fn draw_triangles_u16(&mut self, _first_vertex: i32, _index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.draw();
+    }
+
+    pub fn draw_indexed_triangles_instanced_u16(&mut self, _index_count: i32, _instance_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.draw();
     }
 
     pub fn end_frame(&mut self) {

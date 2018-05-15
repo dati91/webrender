@@ -20,9 +20,10 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind, TransformBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DepthFunction, Device, FrameId, UploadMethod, Texture};
+use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PrimitiveType};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
+use device::{VertexUsageHint, VAO, PBO, /*ProgramCache*/};
 use device::{ApiCapabilities, VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
@@ -31,7 +32,6 @@ use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 #[cfg(feature = "pathfinder")]
 use gpu_glyph_renderer::GpuGlyphRenderer;
-use gpu_types;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
 use internal_types::{CacheTextureId, DebugOutput, FastHashMap, RenderedDocument, ResultMsg};
 use internal_types::{TextureUpdateList, TextureUpdateOp, TextureUpdateSource};
@@ -68,7 +68,6 @@ use tiling::{Frame, RenderTarget, RenderTargetKind, ScalingInfo, TextureCacheRen
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
 use time::precise_time_ns;
-use vertex_types::{BlurInstance, ClipMaskBorderCornerDotDash, ClipMaskInstance, PrimitiveInstance};
 use hal;
 
 cfg_if! {
@@ -258,91 +257,6 @@ fn flag_changed(before: DebugFlags, after: DebugFlags, select: DebugFlags) -> Op
     }
 }
 
-pub trait PrimitiveType {
-    type Primitive: Clone + Copy;
-    fn to_primitive_type(&self) -> Self::Primitive;
-}
-
-
-impl PrimitiveType for gpu_types::BlurInstance {
-    type Primitive = BlurInstance;
-    fn to_primitive_type(&self) -> BlurInstance {
-        BlurInstance {
-            aData0: [0,0,0,0],
-            aData1: [0,0,0,0],
-            aBlurRenderTaskAddress: self.task_address.0 as i32,
-            aBlurSourceTaskAddress: self.src_task_address.0 as i32,
-            aBlurDirection: self.blur_direction as i32,
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::ClipMaskInstance {
-    type Primitive = ClipMaskInstance;
-    fn to_primitive_type(&self) -> ClipMaskInstance {
-        ClipMaskInstance {
-            aClipRenderTaskAddress: self.render_task_address.0 as i32,
-            aScrollNodeId: self.scroll_node_data_index.0 as i32,
-            aClipSegment: self.segment,
-            aClipDataResourceAddress: [
-                self.clip_data_address.u as i32,
-                self.clip_data_address.v as i32,
-                self.resource_address.u as i32,
-                self.resource_address.v as i32,
-            ],
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::ClipMaskBorderCornerDotDash {
-    type Primitive = ClipMaskBorderCornerDotDash;
-    fn to_primitive_type(&self) -> ClipMaskBorderCornerDotDash {
-        ClipMaskBorderCornerDotDash {
-            aClipRenderTaskAddress: self.clip_mask_instance.render_task_address.0 as i32,
-            aScrollNodeId: self.clip_mask_instance.scroll_node_data_index.0 as i32,
-            aClipSegment: self.clip_mask_instance.segment,
-            aClipDataResourceAddress: [
-                self.clip_mask_instance.clip_data_address.u as i32,
-                self.clip_mask_instance.clip_data_address.v as i32,
-                self.clip_mask_instance.resource_address.u as i32,
-                self.clip_mask_instance.resource_address.v as i32,
-            ],
-            aDashOrDot0: [
-                self.dot_dash_data[0],
-                self.dot_dash_data[1],
-                self.dot_dash_data[2],
-                self.dot_dash_data[3],
-            ],
-            aDashOrDot1: [
-                self.dot_dash_data[4],
-                self.dot_dash_data[5],
-                self.dot_dash_data[6],
-                self.dot_dash_data[7],
-            ]
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::PrimitiveInstance {
-    type Primitive = PrimitiveInstance;
-    fn to_primitive_type(&self) -> PrimitiveInstance {
-        PrimitiveInstance {
-            aData0: [
-                self.data[0],
-                self.data[1],
-                self.data[2],
-                self.data[3],
-            ],
-            aData1: [
-                self.data[4],
-                self.data[5],
-                self.data[6],
-                self.data[7],
-            ],
-        }
-    }
-}
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub enum ShaderColorMode {
@@ -426,7 +340,7 @@ pub struct PackedVertex {
     pub pos: [f32; 2],
 }
 
-/*pub(crate) mod desc {
+pub(crate) mod desc {
     use device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
 
     pub const PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
@@ -651,7 +565,7 @@ pub struct PackedVertex {
             },
         ],
     };
-}*/
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphicsApi {
@@ -742,7 +656,7 @@ pub struct GpuGlyphRenderer;
 
 #[cfg(not(feature = "pathfinder"))]
 impl GpuGlyphRenderer {
-    fn new(/*_: &mut Device, _: &VAO, _: bool*/) -> Result<GpuGlyphRenderer, RendererError> {
+    fn new<B: hal::Backend>(_: &mut Device<B>, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
         Ok(GpuGlyphRenderer)
     }
 }
@@ -976,8 +890,8 @@ enum CacheBus {
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
-        //// PBO used for transfers.
-        //buffer: PBO,
+        /// PBO used for transfers.
+        buffer: PBO,
         /// Meta-data about the cached rows.
         rows: Vec<CacheRow>,
         /// Mirrored block data on CPU.
@@ -1028,9 +942,9 @@ impl CacheTexture {
                 count: 0,
             }
         } else*/ {
-            //let buffer = device.create_pbo();
+            let buffer = device.create_pbo();
             CacheBus::PixelBuffer {
-                //buffer,
+                buffer,
                 rows: Vec::new(),
                 cpu_blocks: Vec::new(),
             }
@@ -1045,8 +959,8 @@ impl CacheTexture {
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         device.delete_texture(self.texture);
         match self.bus {
-            CacheBus::PixelBuffer { /*buffer,*/ ..} => {
-                //device.delete_pbo(buffer);
+            CacheBus::PixelBuffer { buffer, ..} => {
+                device.delete_pbo(buffer);
             }
             /*CacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
                 device.delete_program(program);
@@ -1200,7 +1114,7 @@ impl CacheTexture {
 
     fn flush<B: hal::Backend>(&mut self, device: &mut Device<B>) -> usize {
         match self.bus {
-            CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
+            CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
                     .iter()
                     .filter(|row| row.is_dirty)
@@ -1211,7 +1125,7 @@ impl CacheTexture {
 
                 let mut uploader = device.upload_texture(
                     &self.texture,
-                    //buffer,
+                    buffer,
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
                 );
 
@@ -1253,15 +1167,15 @@ impl CacheTexture {
 
 struct VertexDataTexture {
     texture: Texture,
-    //pbo: PBO,
+    pbo: PBO,
 }
 
 impl VertexDataTexture {
     fn new<B: hal::Backend>(device: &mut Device<B>) -> VertexDataTexture {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
-        //let pbo = device.create_pbo();
+        let pbo = device.create_pbo();
 
-        VertexDataTexture { texture/*, pbo*/ }
+        VertexDataTexture { texture, pbo }
     }
 
     fn update<B: hal::Backend, T>(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
@@ -1308,12 +1222,12 @@ impl VertexDataTexture {
             DeviceUintSize::new(width, needed_height),
         );
         device
-            .upload_texture(&self.texture, /*&self.pbo,*/ 0)
+            .upload_texture(&self.texture, &self.pbo, 0)
             .upload(rect, 0, None, data);
     }
 
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
-        //device.delete_pbo(self.pbo);
+        device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
 }
@@ -1366,12 +1280,12 @@ impl LazyInitializedDebugRenderer {
     }
 }
 
-/*pub struct RendererVAOs {
+pub struct RendererVAOs {
     prim_vao: VAO,
     blur_vao: VAO,
     clip_vao: VAO,
     dash_and_dot_vao: VAO,
-}*/
+}
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
@@ -1403,7 +1317,7 @@ pub struct Renderer<B: hal::Backend> {
     last_time: u64,
 
     //pub gpu_profile: GpuProfiler<GpuProfileTag>,
-    //vaos: RendererVAOs,
+    vaos: RendererVAOs,
 
     node_data_texture: VertexDataTexture,
     local_clip_rects_texture: VertexDataTexture,
@@ -1419,7 +1333,7 @@ pub struct Renderer<B: hal::Backend> {
     texture_resolver: SourceTextureResolver,
 
     // A PBO used to do asynchronous texture cache uploads.
-    //texture_cache_upload_pbo: PBO,
+    texture_cache_upload_pbo: PBO,
 
     dither_matrix_texture: Option<Texture>,
 
@@ -1637,15 +1551,33 @@ impl<B: hal::Backend> Renderer<B> {
             None
         };
 
-        let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(/*&mut device,
-                                                            &prim_vao,
-                                                            options.precache_shaders*/));
+        let x0 = 0.0;
+        let y0 = 0.0;
+        let x1 = 1.0;
+        let y1 = 1.0;
 
-        //let blur_vao = device.create_vao_with_new_instances(&desc::BLUR, &prim_vao);
-        //let clip_vao = device.create_vao_with_new_instances(&desc::CLIP, &prim_vao);
-        //let dash_and_dot_vao =
-        //    device.create_vao_with_new_instances(&desc::BORDER_CORNER_DASH_AND_DOT, &prim_vao);
-        //let texture_cache_upload_pbo = device.create_pbo();
+        let quad_indices: [u16; 6] = [0, 1, 2, 2, 1, 3];
+        let quad_vertices = [
+            PackedVertex { pos: [x0, y0] },
+            PackedVertex { pos: [x1, y0] },
+            PackedVertex { pos: [x0, y1] },
+            PackedVertex { pos: [x1, y1] },
+        ];
+
+        let prim_vao = device.create_vao(&desc::PRIM_INSTANCES);
+        device.bind_vao(&prim_vao);
+        device.update_vao_indices(&prim_vao, &quad_indices, VertexUsageHint::Static);
+        device.update_vao_main_vertices(&prim_vao, &quad_vertices, VertexUsageHint::Static);
+
+        let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(&mut device,
+                                                            &prim_vao,
+                                                            options.precache_shaders));
+
+        let blur_vao = device.create_vao_with_new_instances(&desc::BLUR, &prim_vao);
+        let clip_vao = device.create_vao_with_new_instances(&desc::CLIP, &prim_vao);
+        let dash_and_dot_vao =
+            device.create_vao_with_new_instances(&desc::BORDER_CORNER_DASH_AND_DOT, &prim_vao);
+        let texture_cache_upload_pbo = device.create_pbo();
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
 
@@ -1793,12 +1725,12 @@ impl<B: hal::Backend> Renderer<B> {
             last_time: 0,
             //gpu_profile,
             gpu_glyph_renderer,
-            /*vaos: RendererVAOs {
+            vaos: RendererVAOs {
                 prim_vao,
                 blur_vao,
                 clip_vao,
                 dash_and_dot_vao,
-            },*/
+            },
             node_data_texture,
             local_clip_rects_texture,
             render_task_texture,
@@ -1812,7 +1744,7 @@ impl<B: hal::Backend> Renderer<B> {
             gpu_cache_texture,
             gpu_cache_frame_id: FrameId::new(0),
             gpu_cache_overflow: false,
-            //texture_cache_upload_pbo,
+            texture_cache_upload_pbo,
             texture_resolver,
             renderer_errors: Vec::new(),
             #[cfg(feature = "capture")]
@@ -2548,7 +2480,7 @@ impl<B: hal::Backend> Renderer<B> {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
                         let mut uploader = self.device.upload_texture(
                             texture,
-                            //&self.texture_cache_upload_pbo,
+                            &self.texture_cache_upload_pbo,
                             0,
                         );
 
@@ -2632,27 +2564,29 @@ impl<B: hal::Backend> Renderer<B> {
     pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T>(
         &mut self,
         data: &[T],
-        _vertex_array_kind: VertexArrayKind,
+        vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
     )
         where T: PrimitiveType
     {
-        //let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
+        let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
-        //self.device.bind_vao(vao);
+        self.device.bind_vao(vao);
 
         let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
 
-        let data = data.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<T::Primitive>>();
         if batched {
-            self.device.update_instances(&data);
-            self.device.draw();
+            self.device
+                .update_vao_instances(vao, data, VertexUsageHint::Stream);
+            self.device
+                .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
             self.profile_counters.draw_calls.inc();
             stats.total_draw_calls += 1;
         } else {
             for i in 0 .. data.len() {
-                self.device.update_instances(&data[ i .. i + 1]);
-                self.device.draw();
+                self.device
+                    .update_vao_instances(vao, &data[i .. i + 1], VertexUsageHint::Stream);
+                self.device.draw_triangles_u16(0, 6);
                 self.profile_counters.draw_calls.inc();
                 stats.total_draw_calls += 1;
             }
@@ -3028,13 +2962,15 @@ impl<B: hal::Backend> Renderer<B> {
                     // are all set up from the previous draw_instanced_batch call,
                     // so just issue a draw call here to avoid re-uploading the
                     // instances and re-binding textures etc.
-                    self.device.draw();
+                    self.device
+                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                     self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
                     self.device.set_uniforms(projection);
 
-                    self.device.draw();
+                    self.device
+                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                     prev_blend_mode = BlendMode::None;
                 }
@@ -3932,12 +3868,12 @@ impl<B: hal::Backend> Renderer<B> {
         self.node_data_texture.deinit(&mut self.device);
         self.local_clip_rects_texture.deinit(&mut self.device);
         self.render_task_texture.deinit(&mut self.device);
-        //self.device.delete_pbo(self.texture_cache_upload_pbo);
+        self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
-        //self.device.delete_vao(self.vaos.prim_vao);
-        //self.device.delete_vao(self.vaos.clip_vao);
-        //self.device.delete_vao(self.vaos.blur_vao);
-        //self.device.delete_vao(self.vaos.dash_and_dot_vao);
+        self.device.delete_vao(self.vaos.prim_vao);
+        self.device.delete_vao(self.vaos.clip_vao);
+        self.device.delete_vao(self.vaos.blur_vao);
+        self.device.delete_vao(self.vaos.dash_and_dot_vao);
 
         #[cfg(feature = "debug_renderer")]
         {
@@ -4525,7 +4461,7 @@ impl<B: hal::Backend> Renderer<B> {
     }
 }
 
-/*#[cfg(feature = "pathfinder")]
+#[cfg(feature = "pathfinder")]
 fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
                vaos: &'a RendererVAOs,
                gpu_glyph_renderer: &'a GpuGlyphRenderer)
@@ -4552,4 +4488,4 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
         VertexArrayKind::DashAndDot => &vaos.dash_and_dot_vao,
         VertexArrayKind::VectorStencil | VertexArrayKind::VectorCover => unreachable!(),
     }
-}*/
+}
