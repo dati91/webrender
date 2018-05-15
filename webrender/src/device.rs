@@ -19,6 +19,7 @@ use std::fs::File;
 use std::mem;
 use std::ops::Add;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::slice;
 use std::thread;
 use vertex_types::*;
@@ -403,6 +404,8 @@ pub struct VBOId(u32);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct IBOId(u32);
+
+pub struct ProgramCache;
 
 #[derive(Debug, Copy, Clone)]
 pub enum VertexUsageHint {
@@ -1801,6 +1804,7 @@ impl<B: hal::Backend> Device<B> {
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
+        _cached_programs: Option<Rc<ProgramCache>>,
         adapter: &hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
         window_size: (u32, u32),
@@ -2098,9 +2102,9 @@ impl<B: hal::Backend> Device<B> {
         self.device_pixel_ratio = ratio;
     }
 
-    /*pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
         unimplemented!();
-    }*/
+    }
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size

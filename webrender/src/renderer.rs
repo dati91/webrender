@@ -23,7 +23,7 @@ use debug_colors;
 use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PrimitiveType};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
-use device::{VertexUsageHint, VAO, PBO, /*ProgramCache*/};
+use device::{VertexUsageHint, VAO, PBO, ProgramCache};
 use device::{ApiCapabilities, VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
@@ -56,7 +56,7 @@ use std::collections::hash_map::Entry;
 use std::f32;
 use std::mem;
 use std::path::PathBuf;
-//use std::rc::Rc;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -1429,10 +1429,10 @@ impl<B: hal::Backend> Renderer<B> {
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             Box::new(file_watch_handler),
+            options.cached_programs.take(),
             adapter,
             surface,
             window_size,
-            //options.cached_programs.take(),
             options.api_capabilities,
         );
 
@@ -1782,9 +1782,9 @@ impl<B: hal::Backend> Renderer<B> {
 
     // update the program cache with new binaries, e.g. when some of the lazy loaded
     // shader programs got activated in the mean time
-    /*pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
         self.device.update_program_cache(cached_programs);
-    }*/
+    }
 
     /// Processes the result queue.
     ///
@@ -4004,7 +4004,7 @@ pub struct RendererOptions {
     pub recorder: Option<Box<ApiRecordingReceiver>>,
     pub thread_listener: Option<Box<ThreadListener + Send + Sync>>,
     pub enable_render_on_scroll: bool,
-    //pub cached_programs: Option<Rc<ProgramCache>>,
+    pub cached_programs: Option<Rc<ProgramCache>>,
     pub debug_flags: DebugFlags,
     pub renderer_id: Option<u64>,
     pub disable_dual_source_blending: bool,
@@ -4040,7 +4040,7 @@ impl Default for RendererOptions {
             thread_listener: None,
             enable_render_on_scroll: true,
             renderer_id: None,
-            //cached_programs: None,
+            cached_programs: None,
             disable_dual_source_blending: false,
             scene_builder_hooks: None,
             sampler: None,
