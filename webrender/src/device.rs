@@ -1650,11 +1650,11 @@ impl<B: hal::Backend> DescPool<B> {
         dp
     }
 
-    pub fn get_descriptor_set(&mut self) -> &B::DescriptorSet {
+    pub fn descriptor_set(&mut self) -> &B::DescriptorSet {
         &self.descriptor_set[self.current_descriptor_set_id]
     }
 
-    pub fn get_descriptor_set_layout(&mut self) -> &B::DescriptorSetLayout {
+    pub fn descriptor_set_layout(&mut self) -> &B::DescriptorSetLayout {
         &self.descriptor_set_layout
     }
 
@@ -1753,11 +1753,11 @@ impl<B: hal::Backend> DescriptorPools<B> {
     }
 
     pub fn get(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
-        self.get_pool(shader_kind).get_descriptor_set()
+        self.get_pool(shader_kind).descriptor_set()
     }
 
     pub fn get_layout(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
-        self.get_pool(shader_kind).get_descriptor_set_layout()
+        self.get_pool(shader_kind).descriptor_set_layout()
     }
 
     pub fn next(&mut self, shader_kind: &ShaderKind) {
