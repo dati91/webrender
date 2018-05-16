@@ -1645,8 +1645,7 @@ impl<B: hal::Backend> DescPool<B> {
             current_descriptor_set_id: 0,
             max_descriptor_set_size: max_size,
         };
-        dp.next();
-        dp.reset();
+        dp.allocate();
         dp
     }
 
@@ -1661,12 +1660,16 @@ impl<B: hal::Backend> DescPool<B> {
     pub fn next(&mut self) {
         self.current_descriptor_set_id += 1;
         assert!(self.current_descriptor_set_id < self.max_descriptor_set_size);
-        if self.current_descriptor_set_id >= self.descriptor_set.len() {
-            let desc_set =
-                self.descriptor_pool.allocate_set(&self.descriptor_set_layout)
-                    .expect(&format!("Failed to allocate set with layout: {:?}", self.descriptor_set_layout));
-            self.descriptor_set.push(desc_set);
+        if self.current_descriptor_set_id == self.descriptor_set.len() {
+            self.allocate();
         }
+    }
+
+    fn allocate(&mut self) {
+        let desc_set =
+            self.descriptor_pool.allocate_set(&self.descriptor_set_layout)
+                .expect(&format!("Failed to allocate set with layout: {:?}", self.descriptor_set_layout));
+        self.descriptor_set.push(desc_set);
     }
 
     pub fn reset(&mut self) {
