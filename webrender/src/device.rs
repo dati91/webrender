@@ -1090,7 +1090,7 @@ impl<B: hal::Backend> Program<B> {
     pub fn create(
         pipeline_requirements: PipelineRequirements,
         device: &B::Device,
-        descriptor_set_layout: &B::DescriptorSetLayout,
+        pipeline_layout: B::PipelineLayout,
         memory_types: &[hal::MemoryType],
         shader_name: &str,
         shader_kind: ShaderKind,
@@ -1102,8 +1102,6 @@ impl<B: hal::Backend> Program<B> {
         let fs_module = device
             .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
             .unwrap();
-
-        let pipeline_layout = device.create_pipeline_layout(Some(descriptor_set_layout), &[]);
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -2213,7 +2211,7 @@ impl<B: hal::Backend> Device<B> {
         let program = Program::create(
             pipeline_requirements,
             &self.device,
-            self.descriptor_pools.get_layout(shader_kind),
+            self.device.create_pipeline_layout(Some(self.descriptor_pools.get_layout(shader_kind)), &[]),
             &self.memory_types,
             shader_name,
             shader_kind.clone(),
