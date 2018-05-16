@@ -2181,7 +2181,6 @@ impl<B: hal::Backend> Device<B> {
         self.bound_sampler = [TextureFilter::Linear; 16];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
-        self.descriptor_pools.reset();
     }
 
     pub fn reset_image_buffer_offsets(&mut self) {
@@ -3452,6 +3451,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.upload_queue.clear();
         self.command_pool.reset();
+        self.descriptor_pools.reset();
         self.reset_state();
         self.reset_image_buffer_offsets();
         self.reset_program_buffer_offsets();
