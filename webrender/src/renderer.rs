@@ -2490,9 +2490,8 @@ impl<B: hal::Backend> Renderer<B> {
                                     &data[offset as usize ..],
                                 );
                             }
-                            TextureUpdateSource::External { /*id, channel_index*/ .. } => {
-                                unimplemented!();
-                                /*let handler = self.external_image_handler
+                            TextureUpdateSource::External { id, channel_index } => {
+                                let handler = self.external_image_handler
                                     .as_mut()
                                     .expect("Found external image, but no handler set!");
                                 match handler.lock(id, channel_index).source {
@@ -2516,7 +2515,7 @@ impl<B: hal::Backend> Renderer<B> {
                                         panic!("Unexpected external texture {:?} for the texture cache update of {:?}", eid, id);
                                     }
                                 };
-                                handler.unlock(id, channel_index);*/
+                                handler.unlock(id, channel_index);
                             }
                         }
                     }
@@ -3841,8 +3840,7 @@ impl<B: hal::Backend> Renderer<B> {
     }
 
     pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
-        unimplemented!()
-        /*let size = self.gpu_cache_texture.texture.get_dimensions();
+        let size = self.gpu_cache_texture.texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
         self.device.begin_frame();
         self.device.bind_read_target(Some((&self.gpu_cache_texture.texture, 0)));
@@ -3853,7 +3851,7 @@ impl<B: hal::Backend> Renderer<B> {
         );
         self.device.bind_read_target(None);
         self.device.end_frame();
-        (size, texels)*/
+        (size, texels)
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
@@ -4307,8 +4305,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         if config.bits.contains(CaptureBits::FRAME) {
-            unimplemented!()
-            /*let path_textures = config.root.join("textures");
+            let path_textures = config.root.join("textures");
             if !path_textures.is_dir() {
                 fs::create_dir(&path_textures).unwrap();
             }
@@ -4333,7 +4330,7 @@ impl<B: hal::Backend> Renderer<B> {
                 plain_self.textures.push(plain);
             }
 
-            config.serialize(&plain_self, "renderer");*/
+            config.serialize(&plain_self, "renderer");
         }
 
         self.device.bind_read_target(None);
