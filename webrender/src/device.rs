@@ -3009,7 +3009,14 @@ impl<B: hal::Backend> Device<B> {
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
-        let image = &self.frame_images[self.current_frame_id];
+        let (image, layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+            let fbo = &self.fbos[&self.bound_read_fbo];
+            let img = &self.images[&fbo.texture];
+            let layer = fbo.layer_index;
+            (&img.core, layer)
+        } else {
+            (&self.frame_images[self.current_frame_id], 0)
+        };
         let download_buffer: CopyBuffer<B> = CopyBuffer::create(
             &self.device,
             &self.memory_types,
@@ -3023,13 +3030,17 @@ impl<B: hal::Backend> Device<B> {
         let copy_submit = {
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
             let mut barriers = Vec::new();
-
+            let range = hal::image::SubresourceRange {
+                aspects: hal::format::Aspects::COLOR,
+                levels: 0 .. 1,
+                layers: layer .. layer + 1,
+            };
             barriers.extend(download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
             barriers.extend(
                 image.transit(
                     hal::image::Access::TRANSFER_READ,
                     hal::image::Layout::TransferSrcOptimal,
-                    image.subresource_range.clone(),
+                    range.clone(),
                 )
             );
             if !barriers.is_empty() {
@@ -3051,7 +3062,7 @@ impl<B: hal::Backend> Device<B> {
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
                         level: 0,
-                        layers: 0 .. 1,
+                        layers: layer .. layer + 1,
                     },
                     image_offset: hal::image::Offset {
                         x: rect.origin.x as i32,
@@ -3067,7 +3078,7 @@ impl<B: hal::Backend> Device<B> {
             if let Some(barrier) = image.transit(
                 hal::image::Access::empty(),
                 hal::image::Layout::ColorAttachmentOptimal,
-                image.subresource_range.clone(),
+                range,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
