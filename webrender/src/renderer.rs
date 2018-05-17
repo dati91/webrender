@@ -20,11 +20,15 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind, TransformBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture, PBO};
+use device::{DepthFunction, FrameId, UploadMethod, Texture, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, VAO, VBO, CustomVAO};
+             VertexUsageHint, VAO};
 use device::{ProgramCache, ReadPixelsFormat};
+#[cfg(not(feature = "gfx"))]
+use device::{Device, Program, VBO, CustomVAO};
+#[cfg(feature = "gfx")]
+use device::Device;
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 use gleam::gl;
@@ -53,6 +57,7 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::f32;
+use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -67,6 +72,9 @@ use tiling::{Frame, RenderTarget, RenderTargetKind, ScalingInfo, TextureCacheRen
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
 use time::precise_time_ns;
+
+#[cfg(feature = "gfx")]
+use hal;
 
 cfg_if! {
     if #[cfg(feature = "debugger")] {
@@ -660,12 +668,14 @@ impl CpuProfile {
 }
 
 #[cfg(not(feature = "pathfinder"))]
-pub struct GpuGlyphRenderer;
+pub struct GpuGlyphRenderer<B> {
+    phantom_data: PhantomData<B>,
+}
 
 #[cfg(not(feature = "pathfinder"))]
-impl GpuGlyphRenderer {
-    fn new(_: &mut Device, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
-        Ok(GpuGlyphRenderer)
+impl<B> GpuGlyphRenderer<B> {
+    fn new(_: &mut Device<B>, _: &VAO, _: bool) -> Result<GpuGlyphRenderer<B>, RendererError> {
+        Ok(GpuGlyphRenderer { phantom_data: PhantomData })
     }
 }
 
@@ -678,7 +688,7 @@ struct ActiveTexture {
     is_shared: bool,
 }
 
-struct SourceTextureResolver {
+struct SourceTextureResolver<B> {
     /// A vector for fast resolves of texture cache IDs to
     /// native texture IDs. This maps to a free-list managed
     /// by the backend thread / texture cache. We free the
@@ -710,10 +720,12 @@ struct SourceTextureResolver {
 
     /// General pool of render targets.
     render_target_pool: Vec<Texture>,
+
+    phantom_data: PhantomData<B>,
 }
 
-impl SourceTextureResolver {
-    fn new(device: &mut Device) -> SourceTextureResolver {
+impl<B> SourceTextureResolver<B> {
+    fn new(device: &mut Device<B>) -> SourceTextureResolver<B> {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
         device.init_texture::<u8>(
@@ -735,10 +747,11 @@ impl SourceTextureResolver {
             shared_alpha_texture: None,
             saved_textures: Vec::default(),
             render_target_pool: Vec::new(),
+            phantom_data: PhantomData,
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut Device<B>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -803,7 +816,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device) {
+    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -907,6 +920,7 @@ enum CacheBus {
     },
     /// Shader-based scattering updates. Currently rendered by a set
     /// of points into the GPU texture, each carrying a `GpuBlockData`.
+    #[cfg(not(feature = "gfx"))]
     Scatter {
         /// Special program to run the scattered update.
         program: Program,
@@ -922,54 +936,74 @@ enum CacheBus {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture {
+struct CacheTexture<B> {
     texture: Texture,
     bus: CacheBus,
+    phantom_data: PhantomData<B>,
 }
 
-impl CacheTexture {
-    fn new(device: &mut Device, use_scatter: bool) -> Result<Self, RendererError> {
+impl<B> CacheTexture<B> {
+    fn new(device: &mut Device<B>, use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
-        let bus = if use_scatter {
-            let program = device
-                .create_program("gpu_cache_update", "", &desc::GPU_CACHE_UPDATE)?;
-            let buf_position = device.create_vbo();
-            let buf_value = device.create_vbo();
-            //Note: the vertex attributes have to be supplied in the same order
-            // as for program creation, but each assigned to a different stream.
-            let vao = device.create_custom_vao(&[
-                buf_position.stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[0..1]),
-                buf_value   .stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[1..2]),
-            ]);
-            CacheBus::Scatter {
-                program,
-                vao,
-                buf_position,
-                buf_value,
-                count: 0,
-            }
-        } else {
+        #[cfg(not(feature = "gfx"))]
+        {
+            let bus = if use_scatter {
+                let program = device
+                    .create_program("gpu_cache_update", "", &desc::GPU_CACHE_UPDATE)?;
+                let buf_position = device.create_vbo();
+                let buf_value = device.create_vbo();
+                //Note: the vertex attributes have to be supplied in the same order
+                // as for program creation, but each assigned to a different stream.
+                let vao = device.create_custom_vao(&[
+                    buf_position.stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[0..1]),
+                    buf_value.stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[1..2]),
+                ]);
+                CacheBus::Scatter {
+                    program,
+                    vao,
+                    buf_position,
+                    buf_value,
+                    count: 0,
+                }
+            } else {
+                let buffer = device.create_pbo();
+                CacheBus::PixelBuffer {
+                    buffer,
+                    rows: Vec::new(),
+                    cpu_blocks: Vec::new(),
+                }
+            };
+            Ok(CacheTexture {
+                texture,
+                bus,
+                phantom_data: PhantomData,
+            })
+        }
+
+        #[cfg(feature = "gfx")]
+        {
             let buffer = device.create_pbo();
-            CacheBus::PixelBuffer {
+            let bus = CacheBus::PixelBuffer {
                 buffer,
                 rows: Vec::new(),
                 cpu_blocks: Vec::new(),
-            }
-        };
-
-        Ok(CacheTexture {
-            texture,
-            bus,
-        })
+            };
+            Ok(CacheTexture {
+                texture,
+                bus,
+                phantom_data: PhantomData,
+            })
+        }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut Device<B>) {
         device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
             }
+            #[cfg(not(feature = "gfx"))]
             CacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
                 device.delete_program(program);
                 device.delete_custom_vao(vao);
@@ -985,7 +1019,7 @@ impl CacheTexture {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         total_block_count: usize,
         max_height: u32,
     ) {
@@ -1016,6 +1050,7 @@ impl CacheTexture {
                     }
                 }
             }
+            #[cfg(not(feature = "gfx"))]
             CacheBus::Scatter {
                 ref mut buf_position,
                 ref mut buf_value,
@@ -1049,7 +1084,7 @@ impl CacheTexture {
         }
     }
 
-    fn update(&mut self, device: &mut Device, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1084,6 +1119,7 @@ impl CacheTexture {
                     }
                 }
             }
+            #[cfg(not(feature = "gfx"))]
             CacheBus::Scatter {
                 ref buf_position,
                 ref buf_value,
@@ -1120,7 +1156,7 @@ impl CacheTexture {
         }
     }
 
-    fn flush(&mut self, device: &mut Device) -> usize {
+    fn flush(&mut self, device: &mut Device<B>) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -1157,6 +1193,7 @@ impl CacheTexture {
 
                 rows_dirty
             }
+            #[cfg(not(feature = "gfx"))]
             CacheBus::Scatter { ref program, ref vao, count, .. } => {
                 device.disable_depth();
                 device.set_blend(false);
@@ -1173,20 +1210,21 @@ impl CacheTexture {
     }
 }
 
-struct VertexDataTexture {
+struct VertexDataTexture<B> {
     texture: Texture,
     pbo: PBO,
+    phantom_data: PhantomData<B>,
 }
 
-impl VertexDataTexture {
-    fn new(device: &mut Device) -> VertexDataTexture {
+impl<B> VertexDataTexture<B> {
+    fn new(device: &mut Device<B>) -> VertexDataTexture<B> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
         let pbo = device.create_pbo();
 
-        VertexDataTexture { texture, pbo }
+        VertexDataTexture { texture, pbo, phantom_data: PhantomData }
     }
 
-    fn update<T>(&mut self, device: &mut Device, data: &mut Vec<T>) {
+    fn update<T>(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
         if data.is_empty() {
             return;
         }
@@ -1234,7 +1272,7 @@ impl VertexDataTexture {
             .upload(rect, 0, None, data);
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut Device<B>) {
         device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
@@ -1265,23 +1303,25 @@ struct TargetSelector {
 }
 
 #[cfg(feature = "debug_renderer")]
-struct LazyInitializedDebugRenderer {
+struct LazyInitializedDebugRenderer<B> {
     debug_renderer: Option<DebugRenderer>,
+    phantom_data: PhantomData<B>,
 }
 
 #[cfg(feature = "debug_renderer")]
-impl LazyInitializedDebugRenderer {
+impl<B> LazyInitializedDebugRenderer<B> {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
+            phantom_data: PhantomData,
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> &'a mut DebugRenderer {
+    pub fn get_mut<'a>(&'a mut self, device: &mut Device<B>) -> &'a mut DebugRenderer {
         self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(device))
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut Device<B>) {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
@@ -1297,18 +1337,20 @@ pub struct RendererVAOs {
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer {
+pub struct Renderer<B>
+    where B: hal::Backend
+{
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    pub device: Device,
+    pub device: Device<B>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
 
-    shaders: Shaders,
+    shaders: Shaders<B>,
 
-    pub gpu_glyph_renderer: GpuGlyphRenderer,
+    pub gpu_glyph_renderer: GpuGlyphRenderer<B>,
 
     max_texture_size: u32,
     max_recorded_profiles: usize,
@@ -1316,7 +1358,7 @@ pub struct Renderer {
     clear_color: Option<ColorF>,
     enable_clear_scissor: bool,
     #[cfg(feature = "debug_renderer")]
-    debug: LazyInitializedDebugRenderer,
+    debug: LazyInitializedDebugRenderer<B>,
     debug_flags: DebugFlags,
     backend_profile_counters: BackendProfileCounters,
     profile_counters: RendererProfileCounters,
@@ -1327,10 +1369,10 @@ pub struct Renderer {
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
     vaos: RendererVAOs,
 
-    node_data_texture: VertexDataTexture,
-    local_clip_rects_texture: VertexDataTexture,
-    render_task_texture: VertexDataTexture,
-    gpu_cache_texture: CacheTexture,
+    node_data_texture: VertexDataTexture<B>,
+    local_clip_rects_texture: VertexDataTexture<B>,
+    render_task_texture: VertexDataTexture<B>,
+    gpu_cache_texture: CacheTexture<B>,
 
     gpu_cache_frame_id: FrameId,
     gpu_cache_overflow: bool,
@@ -1338,7 +1380,7 @@ pub struct Renderer {
     pipeline_info: PipelineInfo,
 
     // Manages and resolves source textures IDs to real texture IDs.
-    texture_resolver: SourceTextureResolver,
+    texture_resolver: SourceTextureResolver<B>,
 
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
@@ -1368,6 +1410,7 @@ pub struct Renderer {
     read_fbo: FBOId,
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
+    phantom_data: PhantomData<B>,
 }
 
 #[derive(Debug)]
@@ -1396,7 +1439,9 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl Renderer {
+impl<B> Renderer<B>
+    where B: hal::Backend
+{
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1755,6 +1800,7 @@ impl Renderer {
             read_fbo,
             #[cfg(feature = "replay")]
             owned_external_images: FastHashMap::default(),
+            phantom_data: PhantomData,
         };
 
         renderer.set_debug_flags(options.debug_flags);
@@ -2126,6 +2172,7 @@ impl Renderer {
                             row.is_dirty = true;
                         }
                     }
+                    #[cfg(not(feature = "gfx"))]
                     CacheBus::Scatter { .. } => {
                         warn!("Unable to invalidate scattered GPU cache");
                     }
@@ -4124,10 +4171,12 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<PipelineId>,
 }
 
-impl Renderer {
+impl<B> Renderer<B>
+    where B: hal::Backend
+{
     #[cfg(feature = "capture")]
     fn save_texture(
-        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device
+        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device<B>
     ) -> PlainTexture {
         use std::fs;
         use std::io::Write;
@@ -4183,7 +4232,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "replay")]
-    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device) -> Vec<u8> {
+    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device<B>) -> Vec<u8> {
         use std::fs::File;
         use std::io::Read;
 
@@ -4389,6 +4438,7 @@ impl Renderer {
                     rows.extend((0 .. dim.height).map(|_| CacheRow::new()));
                     cpu_blocks.extend_from_slice(blocks);
                 }
+                #[cfg(not(feature = "gfx"))]
                 CacheBus::Scatter { .. } => {}
             }
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
@@ -4453,9 +4503,9 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
 }
 
 #[cfg(not(feature = "pathfinder"))]
-fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
+fn get_vao<'a, B>(vertex_array_kind: VertexArrayKind,
                vaos: &'a RendererVAOs,
-               _: &'a GpuGlyphRenderer)
+               _: &'a GpuGlyphRenderer<B>)
                -> &'a VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,

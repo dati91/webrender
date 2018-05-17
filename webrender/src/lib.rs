@@ -48,11 +48,16 @@ extern crate cfg_if;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
+#[cfg(any(feature = "debugger", feature = "capture", feature = "replay", feature = "gfx"))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate thread_profiler;
+
+#[cfg(feature = "gfx")]
+pub extern crate gfx_hal as hal;
+#[cfg(feature = "gfx")]
+extern crate rand;
 
 mod batch;
 mod border;
@@ -103,6 +108,8 @@ mod texture_allocator;
 mod texture_cache;
 mod tiling;
 mod util;
+#[cfg(feature = "gfx")]
+mod vertex_types;
 
 pub use record::{ApiRecordingReceiver, BinaryRecorder, WEBRENDER_RECORDING_HEADER};
 

@@ -658,7 +658,7 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
-pub struct Device {
+pub struct Device<B> {
     gl: Rc<gl::Gl>,
     // device state
     bound_textures: [gl::GLuint; 16],
@@ -695,16 +695,17 @@ pub struct Device {
 
     // GL extensions
     extensions: Vec<String>,
+    phantom_data: PhantomData<B>,
 }
 
-impl Device {
+impl<B> Device<B> {
     pub fn new(
         gl: Rc<gl::Gl>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         cached_programs: Option<Rc<ProgramCache>>,
-    ) -> Device {
+    ) -> Device<B> {
         let mut max_texture_size = [0];
         unsafe {
             gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);
@@ -762,6 +763,7 @@ impl Device {
             cached_programs,
             frame_id: FrameId(0),
             extensions,
+            phantom_data: PhantomData,
         }
     }
 
@@ -1434,14 +1436,14 @@ impl Device {
         if loaded == false {
             // Compile the vertex shader
             let vs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
+                match Device::<B>::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
                     Ok(vs_id) => vs_id,
                     Err(err) => return Err(err),
                 };
 
             // Compiler the fragment shader
             let fs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
+                match Device::<B>::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
                     Ok(fs_id) => fs_id,
                     Err(err) => {
                         self.gl.delete_shader(vs_id);
