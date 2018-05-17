@@ -4,6 +4,7 @@
 
 
 use app_units::Au;
+use back;
 use blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
@@ -147,7 +148,7 @@ pub struct Wrench {
     device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<back::Backend>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -550,7 +551,9 @@ impl Wrench {
     }
 
     pub fn show_onscreen_help(&mut self) {
-        let help_lines = [
+        unimplemented!()
+        // TODO enable it when debug_renderer fixed
+        /*let help_lines = [
             "Esc - Quit",
             "H - Toggle help",
             "R - Toggle recreating display items each frame",
@@ -576,7 +579,7 @@ impl Wrench {
                 dr.add_text(x, y, line, co.0.into());
                 y += self.device_pixel_ratio * dr.line_height();
             }
-        }
+        }*/
     }
 
     pub fn shut_down(self, rx: Receiver<NotifierEvent>) {

@@ -22,6 +22,7 @@ use ron::de::from_reader;
 use std::collections::HashMap;
 use std::fs::File;
 use util::TransformedRectKind;
+use std::marker::PhantomData;
 
 //use gleam::gl::GlType;
 //use time::precise_time_ns;
@@ -60,11 +61,12 @@ const _ALPHA_FEATURE: &str = "ALPHA_PASS";
 const _DITHERING_FEATURE: &str = "DITHERING";
 const _DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 
-pub struct LazilyCompiledShader<B: hal::Backend> {
+pub struct LazilyCompiledShader<B> {
     program: Option<ProgramId>,
     name: &'static str,
     kind: ShaderKind,
     pipeline_requirements: PipelineRequirements,
+    phantom_data: PhantomData<B>,
 }
 
 impl<B: hal::Backend> LazilyCompiledShader<B> {
@@ -82,6 +84,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             name,
             kind,
             pipeline_requirements,
+            phantom_data: PhantomData,
         };
 
         if precache {

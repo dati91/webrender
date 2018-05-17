@@ -42,7 +42,7 @@ thread_profiler = "0.1.1"
 time = "0.1"
 webrender_api = {path = "../webrender_api"}
 ws = { optional = true, version = "0.7.3" }
-gfx-hal = { optional = true, git = "https://github.com/gfx-rs/gfx.git" }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git" }
 rand = { optional = true, version="0.4" }
 
 [dependencies.pathfinder_font_renderer]

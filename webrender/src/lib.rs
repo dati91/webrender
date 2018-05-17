@@ -54,7 +54,7 @@ extern crate serde;
 #[macro_use]
 extern crate thread_profiler;
 
-#[cfg(feature = "gfx")]
+//#[cfg(feature = "gfx")]
 pub extern crate gfx_hal as hal;
 #[cfg(feature = "gfx")]
 extern crate rand;

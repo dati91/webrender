@@ -22,6 +22,12 @@ extern crate euclid;
 extern crate font_loader;
 extern crate gleam;
 extern crate glutin;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+extern crate gfx_backend_empty as back;
 extern crate image;
 #[macro_use]
 extern crate lazy_static;

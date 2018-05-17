@@ -13,6 +13,7 @@ use api::TextureTarget;
 use api::ImageDescriptor;
 use euclid::Transform3D;
 use gleam::gl;
+use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use log::Level;
 use smallvec::SmallVec;
@@ -103,6 +104,12 @@ pub struct VertexDescriptor {
     pub vertex_attributes: &'static [VertexAttribute],
     pub instance_attributes: &'static [VertexAttribute],
 }
+
+pub trait PrimitiveType { }
+impl PrimitiveType for gpu_types::BlurInstance { }
+impl PrimitiveType for gpu_types::ClipMaskInstance { }
+impl PrimitiveType for gpu_types::ClipMaskBorderCornerDotDash { }
+impl PrimitiveType for gpu_types::PrimitiveInstance { }
 
 enum FBOTarget {
     Read,

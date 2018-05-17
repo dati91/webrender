@@ -279,7 +279,7 @@ pub enum UploadMethod {
     /// Just call `glTexSubImage` directly with the CPU data pointer
     Immediate,
     /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer,
+    PixelBuffer(VertexUsageHint),
 }
 
 /// Plain old data that can be used to initialize a texture.
@@ -2979,7 +2979,7 @@ impl<B: hal::Backend> Device<B> {
 
         match self.upload_method {
             UploadMethod::Immediate => unimplemented!(),
-            UploadMethod::PixelBuffer => {
+            UploadMethod::PixelBuffer(..) => {
                 TextureUploader {
                     device: self,
                     texture,
@@ -3418,6 +3418,10 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn supports_features(&self, features: hal::Features) -> bool {
         self.features.contains(features)
+    }
+
+    pub fn echo_driver_messages(&self) {
+        unimplemented!()
     }
 
     pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
