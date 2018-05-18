@@ -315,7 +315,7 @@ impl Wrench {
         let callbacks = Arc::new(Mutex::new(blob::BlobCallbacks::new()));
 
         let mut api_capabilities = ApiCapabilities::empty();
-        if cfg!(feature = "vulkan") {
+        if cfg!(feature = "vulkan") || cfg!(feature = "dx12") {
             api_capabilities.insert(ApiCapabilities::BLITTING);
         }
 
