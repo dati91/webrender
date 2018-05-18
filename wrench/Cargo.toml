@@ -24,7 +24,7 @@ lazy_static = "1"
 log = "0.4"
 yaml-rust = { git = "https://github.com/vvuk/yaml-rust", features = ["preserve_order"] }
 serde_json = "1.0"
-ron = "0.1.5"
+ron = "0.1.7"
 time = "0.1"
 crossbeam = "0.2"
 osmesa-sys = { version = "0.1.2", optional = true }
@@ -33,6 +33,7 @@ osmesa-src = { git = "https://github.com/jrmuizel/osmesa-src", optional = true, 
 webrender = {path = "../webrender" }
 webrender_api = {path = "../webrender_api", features=["serialize","deserialize"]}
 serde = {version = "1.0", features = ["derive"] }
+winit = { optional = true, version="0.13" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.13"
@@ -41,8 +42,8 @@ core-foundation = "0.5"
 [features]
 headless = [ "osmesa-sys", "osmesa-src" ]
 pathfinder = [ "webrender/pathfinder" ]
-vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
-dx12 = [ "gfx-backend-dx12", "webrender/gfx" ]
+vulkan = [ "gfx-backend-vulkan", "webrender/gfx", "winit" ]
+dx12 = [ "gfx-backend-dx12", "webrender/gfx", "winit" ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dwrote = "0.4.1"

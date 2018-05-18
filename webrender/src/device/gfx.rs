@@ -61,6 +61,15 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 
 const ENTRY_NAME: &str = "main";
 
+pub enum RendererInit<B: hal::Backend> {
+    Gfx {
+        adapter: hal::Adapter<B>,
+        surface: B::Surface,
+        window_size: (u32, u32),
+        api_capabilities: ApiCapabilities,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct Locals {
@@ -1801,15 +1810,19 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
+        init: RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
-        adapter: &hal::Adapter<B>,
+        /*adapter: &hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
-        window_size: (u32, u32),
-        api_capabilities: ApiCapabilities,
+        window_size: (u32, u32),*/
+        //api_capabilities: ApiCapabilities,
     ) -> Self {
+        let (adapter, mut surface, window_size, api_capabilities) = match init {
+            RendererInit::Gfx {adapter, surface, window_size, api_capabilities} => (adapter, surface, window_size, api_capabilities)
+        };
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 
@@ -1886,7 +1899,7 @@ impl<B: hal::Backend> Device<B> {
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
                 );
-        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        let (swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
 

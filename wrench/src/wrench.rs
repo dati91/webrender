@@ -182,6 +182,7 @@ impl Wrench {
         disable_dual_source_blending: bool,
         zoom_factor: f32,
         notifier: Option<Box<RenderNotifier>>,
+        init: webrender::RendererInit<back::Backend>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
@@ -228,7 +229,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 

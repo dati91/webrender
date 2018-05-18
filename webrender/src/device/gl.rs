@@ -29,6 +29,15 @@ use std::rc::Rc;
 use std::slice;
 use std::thread;
 
+pub struct ApiCapabilities;
+
+pub enum RendererInit<B> {
+    Gl {
+        gl: Rc<gl::Gl>,
+        phantom_data: PhantomData<B>
+    },
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -707,12 +716,15 @@ pub struct Device<B> {
 
 impl<B> Device<B> {
     pub fn new(
-        gl: Rc<gl::Gl>,
+        init: RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         cached_programs: Option<Rc<ProgramCache>>,
     ) -> Device<B> {
+        let gl = match init {
+            RendererInit::Gl {gl, ..} => gl,
+        };
         let mut max_texture_size = [0];
         unsafe {
             gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);

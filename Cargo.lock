@@ -292,6 +292,7 @@ name = "direct-composition"
 version = "0.1.0"
 dependencies = [
  "euclid 0.17.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gleam 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "mozangle 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "webrender 0.57.2",
@@ -1762,6 +1763,7 @@ dependencies = [
  "time 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "webrender 0.57.2",
  "webrender_api 0.57.2",
+ "winit 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "yaml-rust 0.3.4 (git+https://github.com/vvuk/yaml-rust)",
 ]
 

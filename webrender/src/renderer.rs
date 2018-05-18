@@ -24,7 +24,7 @@ use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter,
              VertexUsageHint, VAO, PrimitiveType};
-use device::{ProgramCache, ReadPixelsFormat};
+use device::{ProgramCache, ReadPixelsFormat, RendererInit};
 #[cfg(not(feature = "gfx"))]
 use device::{Program, VBO, CustomVAO};
 use euclid::{rect, Transform3D};
@@ -1456,14 +1456,17 @@ impl<B: hal::Backend> Renderer<B>
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        gl: Rc<gl::Gl>,
+        init: RendererInit<B>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = channel::msg_channel()?;
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
-        let gl_type = gl.get_type();
+        #[cfg(not(feature = "gfx"))]
+        let gl_type = match init {
+            RendererInit::Gl { ref gl, .. } => gl.get_type(),
+        };
 
         let debug_server = DebugServer::new(api_tx.clone());
 
@@ -1473,7 +1476,7 @@ impl<B: hal::Backend> Renderer<B>
         };
 
         let mut device = Device::new(
-            gl,
+            init,
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             Box::new(file_watch_handler),
