@@ -42,6 +42,8 @@ const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
 const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
 const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
 
+const COUNT: usize = 4;
+
 pub type TextureId = u32;
 
 pub const INVALID_TEXTURE_ID: TextureId = 0;
@@ -368,7 +370,13 @@ impl Texture {
     }
 
     pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
-        self.last_frame_used == frame_id
+        for i in 0..COUNT {
+            if self.last_frame_used == FrameId(frame_id.0 - i) {
+                return true;
+            }
+        }
+        false
+        //self.last_frame_used == frame_id
     }
 
     #[cfg(feature = "replay")]
@@ -1515,6 +1523,7 @@ impl<B: hal::Backend> Program<B> {
         blend_color: ColorF,
         depth_test: DepthTest,
         scissor_rect: Option<DeviceIntRect>,
+        current_frame_id: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
@@ -1549,7 +1558,7 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            Some(desc_pools.get(&self.shader_kind)),
+            Some(desc_pools.get(&self.shader_kind, current_frame_id % COUNT)),
         );
         desc_pools.next(&self.shader_kind);
 
@@ -1722,9 +1731,32 @@ impl<B: hal::Backend> RenderPass<B> {
     }
 }
 
+pub struct DescSet<B: hal::Backend> {
+    descriptor_set: B::DescriptorSet,
+    is_available: bool,
+    last_used: usize,
+}
+
+impl<B: hal::Backend> DescSet<B> {
+    pub fn use_in_frame(&mut self, frame_id: usize) -> &B::DescriptorSet {
+        //println!("use in frame #{}", frame_id);
+        self.is_available = false;
+        self.last_used = frame_id;
+        &self.descriptor_set
+    }
+
+    pub fn reset(&mut self, frame_id: usize) {
+        //println!("reset #{}", frame_id);
+        if !self.is_available && self.last_used == frame_id {
+            self.is_available = true;
+            //println!("  reseted!");
+        }
+    }
+}
+
 pub struct DescPool<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
-    descriptor_set: Vec<B::DescriptorSet>,
+    descriptor_set: Vec<DescSet<B>>,
     descriptor_set_layout: B::DescriptorSetLayout,
     current_descriptor_set_id: usize,
     max_descriptor_set_size: usize,
@@ -1754,8 +1786,8 @@ impl<B: hal::Backend> DescPool<B> {
         dp
     }
 
-    pub fn descriptor_set(&mut self) -> &B::DescriptorSet {
-        &self.descriptor_set[self.current_descriptor_set_id]
+    pub fn descriptor_set(&mut self, frame_id: usize) -> &B::DescriptorSet {
+        &self.descriptor_set[self.current_descriptor_set_id].use_in_frame(frame_id)
     }
 
     pub fn descriptor_set_layout(&mut self) -> &B::DescriptorSetLayout {
@@ -1763,22 +1795,46 @@ impl<B: hal::Backend> DescPool<B> {
     }
 
     pub fn next(&mut self) {
-        self.current_descriptor_set_id += 1;
+        /*self.current_descriptor_set_id += 1;
         assert!(self.current_descriptor_set_id < self.max_descriptor_set_size);
         if self.current_descriptor_set_id == self.descriptor_set.len() {
             self.allocate();
+        }*/
+        for (i, desc_set) in self.descriptor_set.iter().enumerate() {
+            //println!("#{} ia={} lu={}", i, desc_set.is_available, desc_set.last_used);
+            if desc_set.is_available {
+                self.current_descriptor_set_id = i;
+                //println!("using #{} desc_set", i);
+                return;
+            }
         }
+
+        self.allocate();
+        self.current_descriptor_set_id = self.descriptor_set.len() - 1;
+        //println!("using #{} desc_set (newly allocated)", self.current_descriptor_set_id);
     }
 
     fn allocate(&mut self) {
+        //println!("allocate set #{}", self.descriptor_set.len());
+        assert!(self.descriptor_set.len() < self.max_descriptor_set_size);
         let desc_set =
             self.descriptor_pool.allocate_set(&self.descriptor_set_layout)
                 .expect(&format!("Failed to allocate set with layout: {:?}", self.descriptor_set_layout));
-        self.descriptor_set.push(desc_set);
+        self.descriptor_set.push(
+            DescSet {
+                descriptor_set: desc_set,
+                is_available: true,
+                last_used: COUNT,
+            }
+        );
     }
 
-    pub fn reset(&mut self) {
-        self.current_descriptor_set_id = 0;
+    pub fn reset(&mut self, frame_id: usize) {
+        //println!("  reset");
+        //self.descriptor_set.iter_mut().map(| ds| ds.reset(frame_id));
+        for ds in &mut self.descriptor_set {
+            ds.reset(frame_id);
+        }
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1818,26 +1874,11 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 70,
+                count: 200,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 70,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 10,
-            }
-        ];
-
-        let default_range = vec![
-            hal::pso::DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 240,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 240,
+                count: 200,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
@@ -1845,10 +1886,25 @@ impl<B: hal::Backend> DescriptorPools<B> {
             }
         ];
 
+        let default_range = vec![
+            hal::pso::DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::SampledImage,
+                count: 500,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::Sampler,
+                count: 500,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::UniformBuffer,
+                count: 40,
+            }
+        ];
+
         DescriptorPools {
-            debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 10, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 20, default_range, default_layout),
+            debug_pool: DescPool::new(device, 10, debug_range, debug_layout),
+            cache_clip_pool: DescPool::new(device, 30, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 50, default_range, default_layout),
         }
     }
 
@@ -1860,8 +1916,8 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    pub fn get(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
-        self.get_pool(shader_kind).descriptor_set()
+    pub fn get(&mut self, shader_kind: &ShaderKind, frame_id: usize) -> &B::DescriptorSet {
+        self.get_pool(shader_kind).descriptor_set(frame_id)
     }
 
     pub fn get_layout(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
@@ -1872,10 +1928,11 @@ impl<B: hal::Backend> DescriptorPools<B> {
         self.get_pool(shader_kind).next()
     }
 
-    pub fn reset(&mut self) {
-        self.debug_pool.reset();
-        self.cache_clip_pool.reset();
-        self.default_pool.reset();
+    pub fn reset(&mut self, frame_id: usize) {
+        //println!("reset");
+        self.debug_pool.reset(frame_id);
+        self.cache_clip_pool.reset(frame_id);
+        self.default_pool.reset(frame_id);
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1949,6 +2006,10 @@ pub struct Device<B: hal::Backend> {
     // Supported features
     features: hal::Features,
     api_capabilities: ApiCapabilities,
+
+    image_available_semaphore: B::Semaphore,
+    render_finished_semaphore: B::Semaphore,
+    frame_fence: [B::Fence; COUNT],
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2034,7 +2095,8 @@ impl<B: hal::Backend> Device<B> {
         let swap_config =
             SwapchainConfig::new()
                 .with_color(surface_format)
-                .with_image_count(min_image_count)
+                //.with_image_count(min_image_count)
+                .with_image_count(COUNT as _)
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
                 );
@@ -2207,6 +2269,21 @@ impl<B: hal::Backend> Device<B> {
                 pipeline_requirements.get("ps_border_corner").expect("ps_border_corner missing").descriptor_set_layouts.clone(),
             );
 
+        /*let mut image_available_semaphore: [B::Semaphore; COUNT] = unsafe { mem::uninitialized() };
+        let mut render_finished_semaphore: [B::Semaphore; COUNT] = unsafe { mem::uninitialized() };
+        for sema in image_available_semaphore.iter_mut() {
+            *sema = device.create_semaphore();
+        }
+        for sema in render_finished_semaphore.iter_mut() {
+            *sema = device.create_semaphore();
+        }*/
+        let image_available_semaphore = device.create_semaphore();
+        let render_finished_semaphore = device.create_semaphore();
+        let mut frame_fence: [B::Fence; COUNT] = unsafe { mem::uninitialized() };
+        for fence in frame_fence.iter_mut() {
+            *fence = device.create_fence(true);
+        }
+
         Device {
             device,
             limits,
@@ -2261,6 +2338,10 @@ impl<B: hal::Backend> Device<B> {
             frame_id: FrameId(0),
             features,
             api_capabilities,
+
+            image_available_semaphore,
+            render_finished_semaphore,
+            frame_fence,
         }
     }
 
@@ -2356,7 +2437,7 @@ impl<B: hal::Backend> Device<B> {
             (10, "LocalClipRects")
         ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = self.descriptor_pools.get(&program.shader_kind);
+        let desc_set = self.descriptor_pools.get(&program.shader_kind, self.current_frame_id % COUNT);
         for &(index, sampler_name) in SAMPLERS.iter() {
             if self.bound_textures[index] != 0 {
                 let sampler = match self.bound_sampler[index] {
@@ -2403,7 +2484,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = &self.descriptor_pools.get(&program.shader_kind);
+        let desc_set = &self.descriptor_pools.get(&program.shader_kind, self.current_frame_id % COUNT);
         program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id);
     }
 
@@ -2442,6 +2523,7 @@ impl<B: hal::Backend> Device<B> {
                 self.blend_color,
                 self.current_depth_test,
                 self.scissor_rect,
+                self.current_frame_id,
             )
         };
 
@@ -3590,15 +3672,18 @@ impl<B: hal::Backend> Device<B> {
         self.features.contains(features)
     }
 
-    pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
-        let mut frame_semaphore = self.device.create_semaphore();
+    pub fn set_next_frame_id_and_return_semaphore(&mut self) {// -> B::Semaphore {
+        //let mut frame_semaphore = self.device.create_semaphore();
         let frame = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
+            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore));
         self.current_frame_id = frame.id();
-        frame_semaphore
+        //println!("new frame id {}, uid {}", self.current_frame_id, self.current_frame_id % COUNT);
+        self.device.wait_for_fence(&self.frame_fence[self.current_frame_id % COUNT], !0);
+        self.descriptor_pools.reset(self.current_frame_id % COUNT);
+        //frame_semaphore
     }
 
-    pub fn swap_buffers(&mut self, frame_semaphore: B::Semaphore) {
+    pub fn swap_buffers(&mut self/*, frame_semaphore: B::Semaphore*/) {
         {
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
             let image = &self.frame_images[self.current_frame_id];
@@ -3616,31 +3701,39 @@ impl<B: hal::Backend> Device<B> {
             self.upload_queue.push(cmd_buffer.finish());
         }
 
-        let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        //let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
-            self.device.reset_fence(&frame_fence);
+            self.device.reset_fence(&self.frame_fence[self.current_frame_id % COUNT]);
+            let image_available_semaphore = &self.image_available_semaphore;
+            let render_finished_semaphore = &self.render_finished_semaphore;
             let submission = Submission::new()
-                .wait_on(&[(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
+                .wait_on(&[(image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
+                .signal(Some(render_finished_semaphore))
                 .submit(&self.upload_queue);
-            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
+            self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.current_frame_id % COUNT]));
 
             // TODO: replace with semaphore
-            self.device
-                .wait_for_fence(&frame_fence, !0);
+            //self.device
+            //    .wait_for_fence(&frame_fence, !0);
 
             // present frame
             self.swap_chain
-                .present(&mut self.queue_group.queues[0], &[]);
+                .present(&mut self.queue_group.queues[0], Some(render_finished_semaphore));
         }
         self.upload_queue.clear();
-        self.command_pool.reset();
-        self.descriptor_pools.reset();
+        //self.command_pool.reset();
+        //self.descriptor_pools.reset();
         self.reset_state();
         self.reset_image_buffer_offsets();
         self.reset_program_buffer_offsets();
 
-        self.device.destroy_fence(frame_fence);
-        self.device.destroy_semaphore(frame_semaphore);
+        //self.device.destroy_fence(frame_fence);
+        //self.device.destroy_semaphore(frame_semaphore);
+    }
+
+    pub fn wait_for_resources(&mut self) {
+        self.device.wait_for_fences(&self.frame_fence, hal::device::WaitFor::All, !0);
+        self.command_pool.reset();
     }
 
     pub fn deinit(self) {
@@ -3671,6 +3764,17 @@ impl<B: hal::Backend> Device<B> {
             program.deinit(&self.device)
         }
         self.render_pass.deinit(&self.device);
+        self.device.destroy_semaphore(self.image_available_semaphore);
+        self.device.destroy_semaphore(self.render_finished_semaphore);
+        /*for sema in self.image_available_semaphore {
+            self.device.destroy_semaphore(sema);
+        }
+        for sema in self.render_finished_semaphore {
+            self.device.destroy_semaphore(sema);
+        }
+        for fence in self.frame_fence {
+            self.device.destroy_fence(fence);
+        }*/
         self.device.destroy_swapchain(self.swap_chain);
     }
 }

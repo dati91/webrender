@@ -2219,8 +2219,6 @@ impl<B: hal::Backend> Renderer<B> {
             samplers
         };
 
-        let frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
-
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
             let frame_id = self.device.begin_frame();
@@ -2235,6 +2233,8 @@ impl<B: hal::Backend> Renderer<B> {
 
             frame_id
         });
+
+        /*let frame_semaphore = */self.device.set_next_frame_id_and_return_semaphore();
 
         profile_timers.cpu_time.profile(|| {
             let clear_depth_value = if self.are_documents_intersecting_depth() {
@@ -2357,7 +2357,7 @@ impl<B: hal::Backend> Renderer<B> {
         });
         self.last_time = current_time;
 
-        self.device.swap_buffers(frame_semaphore);
+        self.device.swap_buffers(/*frame_semaphore*/);
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -3860,6 +3860,7 @@ impl<B: hal::Backend> Renderer<B> {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
+        self.device.wait_for_resources();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
