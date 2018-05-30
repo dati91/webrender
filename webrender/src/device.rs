@@ -1733,30 +1733,32 @@ impl<B: hal::Backend> RenderPass<B> {
 
 pub struct DescSet<B: hal::Backend> {
     descriptor_set: B::DescriptorSet,
-    is_available: bool,
+    //is_available: bool,
     last_used: usize,
 }
 
 impl<B: hal::Backend> DescSet<B> {
     pub fn use_in_frame(&mut self, frame_id: usize) -> &B::DescriptorSet {
         //println!("use in frame #{}", frame_id);
-        self.is_available = false;
+        //self.is_available = false;
         self.last_used = frame_id;
         &self.descriptor_set
     }
 
-    pub fn reset(&mut self, frame_id: usize) {
+    pub fn is_available(&mut self, frame_id: usize) -> bool{
         //println!("reset #{}", frame_id);
-        if !self.is_available && self.last_used == frame_id {
+        /*if !self.is_available && self.last_used == frame_id {
             self.is_available = true;
             //println!("  reseted!");
-        }
+        }*/
+        self.last_used == frame_id
     }
 }
 
 pub struct DescPool<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
     descriptor_set: Vec<DescSet<B>>,
+    available_descriptor_set_indices: Vec<usize>,
     descriptor_set_layout: B::DescriptorSetLayout,
     current_descriptor_set_id: usize,
     max_descriptor_set_size: usize,
@@ -1778,6 +1780,7 @@ impl<B: hal::Backend> DescPool<B> {
         let mut dp = DescPool {
             descriptor_pool,
             descriptor_set: vec!(),
+            available_descriptor_set_indices: vec!(),
             descriptor_set_layout,
             current_descriptor_set_id: 0,
             max_descriptor_set_size: max_size,
@@ -1800,21 +1803,25 @@ impl<B: hal::Backend> DescPool<B> {
         if self.current_descriptor_set_id == self.descriptor_set.len() {
             self.allocate();
         }*/
-        for (i, desc_set) in self.descriptor_set.iter().enumerate() {
+        /*for (i, desc_set) in self.descriptor_set.iter().enumerate() {
             //println!("#{} ia={} lu={}", i, desc_set.is_available, desc_set.last_used);
             if desc_set.is_available {
                 self.current_descriptor_set_id = i;
                 //println!("using #{} desc_set", i);
                 return;
             }
-        }
+        }*/
+        self.current_descriptor_set_id = match self.available_descriptor_set_indices.pop() {
+            Some(index) => index,
+            None => self.allocate(),
+        };
 
-        self.allocate();
-        self.current_descriptor_set_id = self.descriptor_set.len() - 1;
+        //self.allocate();
+        //self.current_descriptor_set_id = self.descriptor_set.len() - 1;
         //println!("using #{} desc_set (newly allocated)", self.current_descriptor_set_id);
     }
 
-    fn allocate(&mut self) {
+    fn allocate(&mut self) -> usize {
         //println!("allocate set #{}", self.descriptor_set.len());
         assert!(self.descriptor_set.len() < self.max_descriptor_set_size);
         let desc_set =
@@ -1823,17 +1830,20 @@ impl<B: hal::Backend> DescPool<B> {
         self.descriptor_set.push(
             DescSet {
                 descriptor_set: desc_set,
-                is_available: true,
+                //is_available: true,
                 last_used: COUNT,
             }
         );
+        self.descriptor_set.len() - 1
     }
 
     pub fn reset(&mut self, frame_id: usize) {
         //println!("  reset");
         //self.descriptor_set.iter_mut().map(| ds| ds.reset(frame_id));
-        for ds in &mut self.descriptor_set {
-            ds.reset(frame_id);
+        for (i, ds) in self.descriptor_set.iter_mut().enumerate() {
+            if ds.is_available(frame_id) {
+                self.available_descriptor_set_indices.push(i);
+            }
         }
     }
 
