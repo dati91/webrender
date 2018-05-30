@@ -42,7 +42,7 @@ const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
 const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
 const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
 
-const COUNT: usize = 4;
+const COUNT: usize = 2;
 
 pub type TextureId = u32;
 
@@ -1874,37 +1874,37 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 200,
+                count: 1000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 200,
+                count: 1000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 20,
+                count: 100,
             }
         ];
 
         let default_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 500,
+                count: 2000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 500,
+                count: 2000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: 200,
             }
         ];
 
         DescriptorPools {
             debug_pool: DescPool::new(device, 10, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 30, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 50, default_range, default_layout),
+            cache_clip_pool: DescPool::new(device, 100, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 200, default_range, default_layout),
         }
     }
 
