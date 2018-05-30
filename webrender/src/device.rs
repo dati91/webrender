@@ -2017,8 +2017,8 @@ pub struct Device<B: hal::Backend> {
     features: hal::Features,
     api_capabilities: ApiCapabilities,
 
-    image_available_semaphore: B::Semaphore,
-    render_finished_semaphore: B::Semaphore,
+    image_available_semaphore: [B::Semaphore; COUNT],
+    render_finished_semaphore: [B::Semaphore; COUNT],
     frame_fence: [B::Fence; COUNT],
 }
 
@@ -2279,16 +2279,16 @@ impl<B: hal::Backend> Device<B> {
                 pipeline_requirements.get("ps_border_corner").expect("ps_border_corner missing").descriptor_set_layouts.clone(),
             );
 
-        /*let mut image_available_semaphore: [B::Semaphore; COUNT] = unsafe { mem::uninitialized() };
+        let mut image_available_semaphore: [B::Semaphore; COUNT] = unsafe { mem::uninitialized() };
         let mut render_finished_semaphore: [B::Semaphore; COUNT] = unsafe { mem::uninitialized() };
         for sema in image_available_semaphore.iter_mut() {
             *sema = device.create_semaphore();
         }
         for sema in render_finished_semaphore.iter_mut() {
             *sema = device.create_semaphore();
-        }*/
-        let image_available_semaphore = device.create_semaphore();
-        let render_finished_semaphore = device.create_semaphore();
+        }
+        //let image_available_semaphore = device.create_semaphore();
+        //let render_finished_semaphore = device.create_semaphore();
         let mut frame_fence: [B::Fence; COUNT] = unsafe { mem::uninitialized() };
         for fence in frame_fence.iter_mut() {
             *fence = device.create_fence(true);
@@ -3685,10 +3685,12 @@ impl<B: hal::Backend> Device<B> {
     pub fn set_next_frame_id_and_return_semaphore(&mut self) {// -> B::Semaphore {
         //let mut frame_semaphore = self.device.create_semaphore();
         let frame = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore));
+            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore[self.current_frame_id % COUNT]));
         self.current_frame_id = frame.id();
         //println!("new frame id {}, uid {}", self.current_frame_id, self.current_frame_id % COUNT);
-        self.device.wait_for_fence(&self.frame_fence[self.current_frame_id % COUNT], !0);
+        if !self.device.get_fence_status(&self.frame_fence[self.current_frame_id % COUNT]) {
+            self.device.wait_for_fence(&self.frame_fence[self.current_frame_id % COUNT], !0);
+        }
         self.descriptor_pools.reset(self.current_frame_id % COUNT);
         //frame_semaphore
     }
@@ -3714,8 +3716,8 @@ impl<B: hal::Backend> Device<B> {
         //let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
             self.device.reset_fence(&self.frame_fence[self.current_frame_id % COUNT]);
-            let image_available_semaphore = &self.image_available_semaphore;
-            let render_finished_semaphore = &self.render_finished_semaphore;
+            let image_available_semaphore = &self.image_available_semaphore[self.current_frame_id % COUNT];
+            let render_finished_semaphore = &self.render_finished_semaphore[self.current_frame_id % COUNT];
             let submission = Submission::new()
                 .wait_on(&[(image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(render_finished_semaphore))
@@ -3774,8 +3776,8 @@ impl<B: hal::Backend> Device<B> {
             program.deinit(&self.device)
         }
         self.render_pass.deinit(&self.device);
-        self.device.destroy_semaphore(self.image_available_semaphore);
-        self.device.destroy_semaphore(self.render_finished_semaphore);
+        //self.device.destroy_semaphore(self.image_available_semaphore);
+        //self.device.destroy_semaphore(self.render_finished_semaphore);
         /*for sema in self.image_available_semaphore {
             self.device.destroy_semaphore(sema);
         }
