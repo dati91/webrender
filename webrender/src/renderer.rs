@@ -2300,8 +2300,10 @@ impl<B: hal::Backend> Renderer<B> {
             self.active_documents = active_documents;
         });
 
+        self.device.swap_buffers(/*frame_semaphore*/);
         let current_time = precise_time_ns();
         let ns = current_time - self.last_time;
+        println!("### time between frame={}", ns);
         self.profile_counters.frame_time.set(ns);
 
         if self.max_recorded_profiles > 0 {
@@ -2357,7 +2359,7 @@ impl<B: hal::Backend> Renderer<B> {
         });
         self.last_time = current_time;
 
-        self.device.swap_buffers(/*frame_semaphore*/);
+        //self.device.swap_buffers(/*frame_semaphore*/);
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -2591,6 +2593,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         self.profile_counters.vertices.add(6 * data.len());
+        //println!("{:?}", stats);
     }
 
     fn handle_readback_composite(
@@ -4065,6 +4068,7 @@ impl DebugServer {
 // that we can use in wrench reftests to ensure that
 // tests are batching and/or allocating on render
 // targets as we expect them to.
+#[derive(Debug)]
 pub struct RendererStats {
     pub total_draw_calls: usize,
     pub alpha_target_count: usize,

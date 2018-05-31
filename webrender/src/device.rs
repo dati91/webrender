@@ -24,6 +24,7 @@ use std::rc::Rc;
 use std::slice;
 use std::thread;
 use vertex_types::*;
+use time::precise_time_ns;
 
 use hal;
 
@@ -1523,7 +1524,7 @@ impl<B: hal::Backend> Program<B> {
         blend_color: ColorF,
         depth_test: DepthTest,
         scissor_rect: Option<DeviceIntRect>,
-        current_frame_id: usize,
+        next_id: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
@@ -1558,7 +1559,7 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            Some(desc_pools.get(&self.shader_kind, current_frame_id % COUNT)),
+            Some(desc_pools.get(&self.shader_kind, next_id % COUNT)),
         );
         desc_pools.next(&self.shader_kind);
 
@@ -1973,6 +1974,7 @@ pub struct Device<B: hal::Backend> {
     pub sampler_nearest: B::Sampler,
     pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
+    next_id: usize,
     current_blend_state: BlendState,
     blend_color: ColorF,
     current_depth_test: DepthTest,
@@ -2315,6 +2317,7 @@ impl<B: hal::Backend> Device<B> {
             sampler_nearest,
             upload_queue: Vec::new(),
             current_frame_id: 0,
+            next_id: 0,
             current_blend_state: BlendState::Off,
             current_depth_test: DepthTest::Off,
             blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
@@ -2447,7 +2450,7 @@ impl<B: hal::Backend> Device<B> {
             (10, "LocalClipRects")
         ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = self.descriptor_pools.get(&program.shader_kind, self.current_frame_id % COUNT);
+        let desc_set = self.descriptor_pools.get(&program.shader_kind, self.next_id % COUNT);
         for &(index, sampler_name) in SAMPLERS.iter() {
             if self.bound_textures[index] != 0 {
                 let sampler = match self.bound_sampler[index] {
@@ -2494,7 +2497,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = &self.descriptor_pools.get(&program.shader_kind, self.current_frame_id % COUNT);
+        let desc_set = &self.descriptor_pools.get(&program.shader_kind, self.next_id % COUNT);
         program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id);
     }
 
@@ -2533,7 +2536,7 @@ impl<B: hal::Backend> Device<B> {
                 self.blend_color,
                 self.current_depth_test,
                 self.scissor_rect,
-                self.current_frame_id,
+                self.next_id,
             )
         };
 
@@ -3685,13 +3688,22 @@ impl<B: hal::Backend> Device<B> {
     pub fn set_next_frame_id_and_return_semaphore(&mut self) {// -> B::Semaphore {
         //let mut frame_semaphore = self.device.create_semaphore();
         let frame = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore[self.current_frame_id % COUNT]));
+            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore[self.next_id % COUNT]));
         self.current_frame_id = frame.id();
-        //println!("new frame id {}, uid {}", self.current_frame_id, self.current_frame_id % COUNT);
-        if !self.device.get_fence_status(&self.frame_fence[self.current_frame_id % COUNT]) {
-            self.device.wait_for_fence(&self.frame_fence[self.current_frame_id % COUNT], !0);
-        }
-        self.descriptor_pools.reset(self.current_frame_id % COUNT);
+        //println!("new frame id {}, uid {}", self.current_frame_id, self.next_id % COUNT);
+        let mut before_fence = 0;
+        let mut after_fence = 0;
+        let start = precise_time_ns();
+        //if !self.device.get_fence_status(&self.frame_fence[self.next_id % COUNT]) {
+            before_fence = precise_time_ns();
+            self.device.wait_for_fence(&self.frame_fence[self.next_id % COUNT], !0);
+            after_fence = precise_time_ns();
+        //}
+        self.descriptor_pools.reset(self.next_id % COUNT);
+        println!("start={:?}", start);
+        println!("before_fence={:?}", before_fence);
+        println!("after_fence={:?}", after_fence);
+        println!("now={:?}", precise_time_ns());
         //frame_semaphore
     }
 
@@ -3714,24 +3726,34 @@ impl<B: hal::Backend> Device<B> {
         }
 
         //let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        let mut before_submit = 0;
+        let mut after_submit_before_present = 0;
+        let start = precise_time_ns();
         {
-            self.device.reset_fence(&self.frame_fence[self.current_frame_id % COUNT]);
-            let image_available_semaphore = &self.image_available_semaphore[self.current_frame_id % COUNT];
-            let render_finished_semaphore = &self.render_finished_semaphore[self.current_frame_id % COUNT];
+            self.device.reset_fence(&self.frame_fence[self.next_id % COUNT]);
+            before_submit = precise_time_ns();
+            let image_available_semaphore = &self.image_available_semaphore[self.next_id % COUNT];
+            let render_finished_semaphore = &self.render_finished_semaphore[self.next_id % COUNT];
             let submission = Submission::new()
                 .wait_on(&[(image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(render_finished_semaphore))
                 .submit(&self.upload_queue);
-            self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.current_frame_id % COUNT]));
+            self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.next_id % COUNT]));
 
             // TODO: replace with semaphore
             //self.device
             //    .wait_for_fence(&frame_fence, !0);
+            after_submit_before_present = precise_time_ns();
 
             // present frame
             self.swap_chain
                 .present(&mut self.queue_group.queues[0], Some(render_finished_semaphore));
         }
+        println!("start={:?}", start);
+        println!("before_submit={:?}", before_submit);
+        println!("after_submit_before_fence={:?}", after_submit_before_present);
+        println!("now={:?}", precise_time_ns());
+        self.next_id += 1;
         self.upload_queue.clear();
         //self.command_pool.reset();
         //self.descriptor_pools.reset();
