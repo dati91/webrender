@@ -12,6 +12,7 @@ use euclid::Transform3D;
 use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
+use ron::de::from_reader;
 use std::cell::Cell;
 use std::cmp;
 use std::collections::HashMap;
@@ -456,7 +457,7 @@ pub enum ShaderError {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
+pub enum VertexArrayKind {
     Primitive,
     Blur,
     Clip,
@@ -466,7 +467,8 @@ pub(crate) enum VertexArrayKind {
     Border,
 }
 
-pub(crate) enum ShaderKind {
+#[derive(Debug, Copy, Clone)]
+pub enum ShaderKind {
     Primitive,
     Cache(VertexArrayKind),
     ClipCache,
@@ -1204,9 +1206,6 @@ impl<B: hal::Backend> UniformBuffer<B> {
 
 pub(crate) struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, u32>,
-    pub descriptor_set_layout: B::DescriptorSetLayout,
-    pub descriptor_pool: B::DescriptorPool,
-    pub descriptor_set: B::DescriptorSet,
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
@@ -1214,15 +1213,17 @@ pub(crate) struct Program<B: hal::Backend> {
     pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: UniformBuffer<B>,
     shader_name: String,
+    shader_kind: ShaderKind,
 }
 
 impl<B: hal::Backend> Program<B> {
     pub fn create(
         pipeline_requirements: PipelineRequirements,
         device: &B::Device,
+        pipeline_layout: B::PipelineLayout,
         memory_types: &[hal::MemoryType],
         shader_name: &str,
-        shader_kind: &ShaderKind,
+        shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
     ) -> Program<B> {
         let vs_module = device
@@ -1231,18 +1232,6 @@ impl<B: hal::Backend> Program<B> {
         let fs_module = device
             .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
             .unwrap();
-
-        let descriptor_set_layout = device.create_descriptor_set_layout(&pipeline_requirements.descriptor_set_layouts, &[]);
-        let mut descriptor_pool =
-            device.create_descriptor_pool(
-                1, //The number of descriptor sets
-                pipeline_requirements.descriptor_range_descriptors.as_slice(),
-            );
-        let descriptor_set =
-            descriptor_pool.allocate_set(&descriptor_set_layout)
-                .expect(&format!("Failed to allocate set with layout: {:?}", descriptor_set_layout));
-
-        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), &[]);
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -1266,7 +1255,7 @@ impl<B: hal::Backend> Program<B> {
                 fragment: Some(fs_entry),
             };
 
-            let pipeline_states = match *shader_kind {
+            let pipeline_states = match shader_kind {
                 ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![(BlendState::Off, DepthTest::Off)],
                 ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
                 ShaderKind::Cache(VertexArrayKind::Primitive) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
@@ -1318,7 +1307,7 @@ impl<B: hal::Backend> Program<B> {
                     (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
                 ],
             };
-            let format = match *shader_kind {
+            let format = match shader_kind {
                 ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::DashAndDot) => ImageFormat::R8,
                 ShaderKind::Cache(VertexArrayKind::Blur) if shader_name.contains("_alpha_target") => ImageFormat::R8,
                 _ => ImageFormat::BGRA8,
@@ -1368,7 +1357,7 @@ impl<B: hal::Backend> Program<B> {
         device.destroy_shader_module(vs_module);
         device.destroy_shader_module(fs_module);
 
-        let (vertex_buffer_stride, vertex_buffer_len) = match *shader_kind {
+        let (vertex_buffer_stride, vertex_buffer_len) = match shader_kind {
             ShaderKind::DebugColor => {
                 let stride = mem::size_of::<DebugColorVertex>();
                 (stride, MAX_DEBUG_COLOR_VERTEX_COUNT * stride)
@@ -1395,7 +1384,7 @@ impl<B: hal::Backend> Program<B> {
 
         if shader_kind.is_debug() {
             let index_buffer_stride = mem::size_of::<u32>();
-            let index_buffer_len = match *shader_kind {
+            let index_buffer_len = match shader_kind {
                 ShaderKind::DebugColor => MAX_DEBUG_COLOR_INDEX_COUNT * index_buffer_stride,
                 ShaderKind::DebugFont => MAX_DEBUG_FONT_INDEX_COUNT * index_buffer_stride,
                 _ => unreachable!(),
@@ -1412,7 +1401,7 @@ impl<B: hal::Backend> Program<B> {
             vertex_buffer.update(device, 0, (QUAD.len() * vertex_buffer_stride) as u64, &QUAD);
         }
 
-        let instance_buffer_stride = match *shader_kind {
+        let instance_buffer_stride = match shader_kind {
             ShaderKind::Primitive |
             ShaderKind::Brush |
             ShaderKind::Text |
@@ -1425,7 +1414,7 @@ impl<B: hal::Backend> Program<B> {
             _ => unreachable!()
         };
 
-        let instance_buffer_len = match *shader_kind {
+        let instance_buffer_len = match shader_kind {
             ShaderKind::DebugColor | ShaderKind::DebugFont => 1,
             _ => MAX_INSTANCE_COUNT * instance_buffer_stride,
         };
@@ -1445,9 +1434,6 @@ impl<B: hal::Backend> Program<B> {
 
         Program {
             bindings_map,
-            descriptor_set_layout,
-            descriptor_pool,
-            descriptor_set,
             pipeline_layout,
             pipelines,
             vertex_buffer,
@@ -1455,6 +1441,7 @@ impl<B: hal::Backend> Program<B> {
             instance_buffer: InstanceBuffer::new(instance_buffer),
             locals_buffer,
             shader_name: String::from(shader_name),
+            shader_kind,
         }
     }
 
@@ -1477,6 +1464,7 @@ impl<B: hal::Backend> Program<B> {
     fn bind_locals(
         &mut self,
         device: &B::Device,
+        set: &B::DescriptorSet,
         projection: &Transform3D<f32>,
         device_pixel_ratio: f32,
         u_mode: i32,
@@ -1494,7 +1482,7 @@ impl<B: hal::Backend> Program<B> {
         );
         device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
+                set,
                 binding: self.bindings_map["Locals"],
                 array_offset: 0,
                 descriptors: Some(
@@ -1504,11 +1492,11 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    pub fn bind_texture(&mut self, device: &B::Device, image: &ImageCore<B>, sampler: &B::Sampler, binding: &'static str) {
+    fn bind_texture(&mut self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, sampler: &B::Sampler, binding: &'static str) {
         if self.bindings_map.contains_key(&("t".to_owned() + binding)) {
             device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
-                    set: &self.descriptor_set,
+                    set,
                     binding: self.bindings_map[&("t".to_owned() + binding)],
                     array_offset: 0,
                     descriptors: Some(
@@ -1516,7 +1504,7 @@ impl<B: hal::Backend> Program<B> {
                     ),
                 },
                 hal::pso::DescriptorSetWrite {
-                    set: &self.descriptor_set,
+                    set,
                     binding: self.bindings_map[&("s".to_owned() + binding)],
                     array_offset: 0,
                     descriptors: Some(
@@ -1546,6 +1534,7 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
+        desc_pools: &mut DescriptorPools<B>,
         clear_values: &[hal::command::ClearValue],
         blend_state: BlendState,
         blend_color: ColorF,
@@ -1585,9 +1574,10 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            Some(&self.descriptor_set),
+            Some(desc_pools.get(&self.shader_kind)),
             &[],
         );
+        desc_pools.next(&self.shader_kind);
 
         if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
             cmd_buffer.set_blend_constants(blend_color.to_array());
@@ -1625,8 +1615,6 @@ impl<B: hal::Backend> Program<B> {
         }
         self.instance_buffer.deinit(device);
         self.locals_buffer.deinit(device);
-        device.destroy_descriptor_pool(self.descriptor_pool);
-        device.destroy_descriptor_set_layout(self.descriptor_set_layout);
         device.destroy_pipeline_layout(self.pipeline_layout);
         for pipeline in self.pipelines.drain() {
             device.destroy_graphics_pipeline(pipeline.1);
@@ -1760,6 +1748,169 @@ impl<B: hal::Backend> RenderPass<B> {
     }
 }
 
+pub struct DescPool<B: hal::Backend> {
+    descriptor_pool: B::DescriptorPool,
+    descriptor_set: Vec<B::DescriptorSet>,
+    descriptor_set_layout: B::DescriptorSetLayout,
+    current_descriptor_set_id: usize,
+    max_descriptor_set_size: usize,
+}
+
+impl<B: hal::Backend> DescPool<B> {
+    pub fn new(
+        device: &B::Device,
+        max_size: usize,
+        descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
+        descriptor_set_layout: Vec<DescriptorSetLayoutBinding>,
+    ) -> Self {
+        let descriptor_pool =
+            device.create_descriptor_pool(
+                max_size,
+                descriptor_range_descriptors.as_slice(),
+            );
+        let descriptor_set_layout = device.create_descriptor_set_layout(&descriptor_set_layout, &[]);
+        let mut dp = DescPool {
+            descriptor_pool,
+            descriptor_set: vec!(),
+            descriptor_set_layout,
+            current_descriptor_set_id: 0,
+            max_descriptor_set_size: max_size,
+        };
+        dp.allocate();
+        dp
+    }
+
+    pub fn descriptor_set(&mut self) -> &B::DescriptorSet {
+        &self.descriptor_set[self.current_descriptor_set_id]
+    }
+
+    pub fn descriptor_set_layout(&mut self) -> &B::DescriptorSetLayout {
+        &self.descriptor_set_layout
+    }
+
+    pub fn next(&mut self) {
+        self.current_descriptor_set_id += 1;
+        assert!(self.current_descriptor_set_id < self.max_descriptor_set_size);
+        if self.current_descriptor_set_id == self.descriptor_set.len() {
+            self.allocate();
+        }
+    }
+
+    fn allocate(&mut self) {
+        let desc_set =
+            self.descriptor_pool.allocate_set(&self.descriptor_set_layout)
+                .expect(&format!("Failed to allocate set with layout: {:?}", self.descriptor_set_layout));
+        self.descriptor_set.push(desc_set);
+    }
+
+    pub fn reset(&mut self) {
+        self.current_descriptor_set_id = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_descriptor_set_layout(self.descriptor_set_layout);
+        device.destroy_descriptor_pool(self.descriptor_pool);
+    }
+}
+
+pub struct DescriptorPools<B: hal::Backend> {
+    pub debug_pool: DescPool<B>,
+    pub cache_clip_pool: DescPool<B>,
+    pub default_pool: DescPool<B>,
+}
+
+impl<B: hal::Backend> DescriptorPools<B> {
+    pub fn new(
+        device: &B::Device,
+        debug_layout: Vec<DescriptorSetLayoutBinding>,
+        cache_clip_layout: Vec<DescriptorSetLayoutBinding>,
+        default_layout: Vec<DescriptorSetLayoutBinding>,
+    ) -> Self {
+        let debug_range = vec![
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::SampledImage,
+                count: 20,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::Sampler,
+                count: 20,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::UniformBuffer,
+                count: 5,
+            }
+        ];
+
+        let cache_clip_range = vec![
+            hal::pso::DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::SampledImage,
+                count: 70,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::Sampler,
+                count: 70,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::UniformBuffer,
+                count: 10,
+            }
+        ];
+
+        let default_range = vec![
+            hal::pso::DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::SampledImage,
+                count: 240,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::Sampler,
+                count: 240,
+            },
+            DescriptorRangeDesc {
+                ty: hal::pso::DescriptorType::UniformBuffer,
+                count: 20,
+            }
+        ];
+
+        DescriptorPools {
+            debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
+            cache_clip_pool: DescPool::new(device, 10, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 20, default_range, default_layout),
+        }
+    }
+
+    fn get_pool(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
+        match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => &mut self.debug_pool,
+            ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::DashAndDot) => &mut self.cache_clip_pool,
+            _ => &mut self.default_pool,
+        }
+    }
+
+    pub fn get(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
+        self.get_pool(shader_kind).descriptor_set()
+    }
+
+    pub fn get_layout(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
+        self.get_pool(shader_kind).descriptor_set_layout()
+    }
+
+    pub fn next(&mut self, shader_kind: &ShaderKind) {
+        self.get_pool(shader_kind).next()
+    }
+
+    pub fn reset(&mut self) {
+        self.debug_pool.reset();
+        self.cache_clip_pool.reset();
+        self.default_pool.reset();
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.debug_pool.deinit(device);
+        self.cache_clip_pool.deinit(device);
+        self.default_pool.deinit(device);
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
@@ -1789,6 +1940,7 @@ pub struct Device<B: hal::Backend> {
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
+    descriptor_pools: DescriptorPools<B>,
     // device state
     bound_textures: [u32; 16],
     bound_program: ProgramId,
@@ -2066,6 +2218,20 @@ impl<B: hal::Backend> Device<B> {
             hal::image::WrapMode::Clamp,
         ));
 
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+        let pipeline_requirements: HashMap<String, PipelineRequirements> =
+            from_reader(file).expect("Failed to load shader_bindings.ron");
+
+        let descriptor_pools =
+            DescriptorPools::new(
+                &device,
+                pipeline_requirements.get("debug_color").expect("debug_color missing").descriptor_set_layouts.clone(),
+                pipeline_requirements.get("cs_clip_rectangle_transform").expect("cs_clip_rectangle_transform missing").descriptor_set_layouts.clone(),
+                pipeline_requirements.get("ps_border_corner").expect("ps_border_corner missing").descriptor_set_layouts.clone(),
+            );
+
+
         Device {
             device,
             limits,
@@ -2106,6 +2272,7 @@ impl<B: hal::Backend> Device<B> {
             images: FastHashMap::default(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
+            descriptor_pools,
             bound_textures: [0; 16],
             bound_program: INVALID_PROGRAM_ID,
             bound_sampler: [TextureFilter::Linear; 16],
@@ -2176,9 +2343,10 @@ impl<B: hal::Backend> Device<B> {
         let program = Program::create(
             pipeline_requirements,
             &self.device,
+            self.device.create_pipeline_layout(Some(self.descriptor_pools.get_layout(shader_kind)), &[]),
             &self.memory_types,
             shader_name,
-            shader_kind,
+            shader_kind.clone(),
             &self.render_pass,
         );
 
@@ -2212,13 +2380,14 @@ impl<B: hal::Backend> Device<B> {
             (10, "LocalClipRects")
         ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
+        let desc_set = self.descriptor_pools.get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS.iter() {
             if self.bound_textures[index] != 0 {
                 let sampler = match self.bound_sampler[index] {
                     TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
                     TextureFilter::Nearest => &self.sampler_nearest,
                 };
-                program.bind_texture(&self.device, &self.images[&self.bound_textures[index]].core, &sampler, sampler_name);
+                program.bind_texture(&self.device, desc_set, &self.images[&self.bound_textures[index]].core, &sampler, sampler_name);
             }
         }
     }
@@ -2257,7 +2426,9 @@ impl<B: hal::Backend> Device<B> {
     ) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_locals(&self.device, transform, self.device_pixel_ratio, self.program_mode_id);
+        let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
+        let desc_set = &self.descriptor_pools.get(&program.shader_kind);
+        program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id);
     }
 
     pub fn update_instances<T>(
@@ -2289,6 +2460,7 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.clone(),
                 rp,
                 &fb,
+                &mut self.descriptor_pools,
                 &vec![],
                 self.current_blend_state,
                 self.blend_color,
@@ -2298,7 +2470,6 @@ impl<B: hal::Backend> Device<B> {
         };
 
         self.upload_queue.push(submit);
-        self.submit_to_gpu();
     }
 
     pub fn begin_frame(&mut self) -> FrameId {
@@ -3315,7 +3486,6 @@ impl<B: hal::Backend> Device<B> {
         };
 
         self.upload_queue.push(submit);
-        self.submit_to_gpu();
     }
 
     fn clear_target_image(
@@ -3536,23 +3706,6 @@ impl<B: hal::Backend> Device<B> {
         frame_semaphore
     }
 
-    pub fn submit_to_gpu(&mut self) {
-        let mut frame_fence = self.device.create_fence(false); // TODO: remove
-        {
-            self.device.reset_fence(&frame_fence);
-            let submission = Submission::new()
-                .submit(&self.upload_queue);
-            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
-
-            // TODO: replace with semaphore
-            self.device
-                .wait_for_fence(&frame_fence, !0);
-        }
-        self.upload_queue.clear();
-        self.command_pool.reset();
-        self.device.destroy_fence(frame_fence);
-    }
-
     pub fn swap_buffers(&mut self, frame_semaphore: B::Semaphore) {
         {
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
@@ -3589,6 +3742,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.upload_queue.clear();
         self.command_pool.reset();
+        self.descriptor_pools.reset();
         self.reset_state();
         self.reset_image_buffer_offsets();
         self.reset_program_buffer_offsets();
@@ -3620,6 +3774,7 @@ impl<B: hal::Backend> Device<B> {
         self.frame_depth.deinit(&self.device);
         self.device.destroy_sampler(self.sampler_linear);
         self.device.destroy_sampler(self.sampler_nearest);
+        self.descriptor_pools.deinit(&self.device);
         for (_, program) in self.programs {
             program.deinit(&self.device)
         }
