@@ -1754,6 +1754,8 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
+        device.submit_and_wait();
+
         let mut renderer = Renderer {
             result_rx,
             debug_server,
@@ -2272,7 +2274,7 @@ impl<B: hal::Backend> Renderer<B> {
             samplers
         };
 
-        let frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
+        self.device.set_next_frame_id();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2349,6 +2351,8 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             }
 
+            self.device.swap_buffers();
+
             self.unlock_external_images();
             self.active_documents = active_documents;
         });
@@ -2394,6 +2398,8 @@ impl<B: hal::Backend> Renderer<B> {
             //self.device.echo_driver_messages();
         }
 
+        //println!("profile_timers {}", format!("{:.2} ms", profile_timers.cpu_time.get() as f64 / 1000000.0));
+
         self.backend_profile_counters.reset();
         self.profile_counters.reset();
         self.profile_counters.frame_counter.inc();
@@ -2409,8 +2415,6 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.end_frame();
         });
         self.last_time = current_time;
-
-        self.device.swap_buffers(frame_semaphore);
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -3480,7 +3484,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         counters.targets_used.inc();
-
+        //let start = precise_time_ns();
         // First, try finding a perfect match
         let selector = TargetSelector {
             size: list.max_size,
@@ -3532,6 +3536,8 @@ impl<B: hal::Backend> Renderer<B> {
         );
 
         list.check_ready(&texture);
+        //let end = precise_time_ns();
+        //println!("used_in_frame {}", end - start);
         Some(ActiveTexture {
             texture,
             saved_index: list.saved_index.clone(),
@@ -3940,6 +3946,7 @@ impl<B: hal::Backend> Renderer<B> {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
+        self.device.wait_for_resources();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);

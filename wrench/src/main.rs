@@ -424,9 +424,9 @@ fn make_window(
             let window = winit::WindowBuilder::new()
                 .with_title("WRech")
                 .with_multitouch()
-                .with_dimensions(size.width, size.height)
+                .with_min_dimensions(size.width, size.height)
                 .build(events_loop).unwrap();
-
+            assert!(window.get_inner_size().unwrap() == (size.width, size.height));
             return WindowWrapper::Window(window);
         }
         None => return WindowWrapper::Headless(HeadlessContext::new(size.width, size.height)),
