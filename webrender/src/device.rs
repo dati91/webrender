@@ -51,7 +51,7 @@ pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
-pub const MAX_FRAME_COUNT: usize = 3;
+pub const MAX_FRAME_COUNT: usize = 2;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -1852,52 +1852,52 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let debug_range = vec![
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 200,
+                count: 20,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 200,
+                count: 20,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 50,
+                count: 5,
             }
         ];
 
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 1000,
+                count: 400,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 1000,
+                count: 400,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 100,
+                count: 40,
             }
         ];
 
         let default_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 2000,
+                count: 400,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 2000,
+                count: 400,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 200,
+                count: 40,
             }
         ];
 
         DescriptorPools {
-            debug_pool: DescPool::new(device, 50, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 100, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 200, default_range, default_layout),
+            debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
+            cache_clip_pool: DescPool::new(device, 40, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 40, default_range, default_layout),
         }
     }
 
