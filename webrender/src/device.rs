@@ -3176,6 +3176,11 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn free_image(&mut self, texture: &mut Texture) {
+        // Note: this is very rare case, but if becomes a problem
+        // we need to handle this in renderer.rs
+        if texture.used_in_frame(self.frame_id) {
+            self.wait_for_resources();
+        }
         if let Some(depth_rb) = texture.depth_rb.take() {
             let old_rbo = self.rbos.remove(&depth_rb).unwrap();
             old_rbo.deinit(&self.device);
@@ -3248,13 +3253,7 @@ impl<B: hal::Backend> Device<B> {
         format: ReadPixelsFormat,
         output: &mut [u8],
     ) {
-        for fence in &mut self.frame_fence {
-            if fence.is_submitted {
-                self.device.wait_for_fence(&fence.inner, !0);
-                self.device.reset_fence(&fence.inner);
-                fence.is_submitted = false;
-            }
-        }
+        self.wait_for_resources();
 
         let bytes_per_pixel = match format {
             ReadPixelsFormat::Standard(imf) => imf.bytes_per_pixel(),
@@ -3738,15 +3737,18 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn wait_for_resources_and_reset(&mut self) {
+        self.wait_for_resources();
+        for command_pool in &mut self.command_pool {
+            command_pool.reset();
+        }
+    }
+    fn wait_for_resources(&mut self) {
         for fence in &mut self.frame_fence {
             if fence.is_submitted {
                 self.device.wait_for_fence(&fence.inner, !0);
                 self.device.reset_fence(&fence.inner);
                 fence.is_submitted = false;
             }
-        }
-        for command_pool in &mut self.command_pool {
-            command_pool.reset();
         }
     }
 
