@@ -1934,6 +1934,11 @@ impl<B: hal::Backend> DescriptorPools<B> {
     }
 }
 
+struct Fence<B: hal::Backend> {
+    inner: B::Fence,
+    is_submitted: bool,
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
@@ -1999,7 +2004,7 @@ pub struct Device<B: hal::Backend> {
     features: hal::Features,
 
     next_id: usize,
-    frame_fence: SmallVec<[B::Fence; 1]>,
+    frame_fence: SmallVec<[Fence<B>; 1]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
 }
@@ -2258,7 +2263,13 @@ impl<B: hal::Backend> Device<B> {
                 )
             );
 
-            frame_fence.push(device.create_fence(true));
+            let fence = device.create_fence(false);
+            frame_fence.push(
+                Fence {
+                    inner: fence,
+                    is_submitted: false,
+                }
+            );
 
             let mut cp = device.create_command_pool_typed(
                 &queue_group,
@@ -3237,7 +3248,14 @@ impl<B: hal::Backend> Device<B> {
         format: ReadPixelsFormat,
         output: &mut [u8],
     ) {
-        self.device.wait_for_fences(&self.frame_fence, hal::device::WaitFor::All, !0);
+        for fence in &mut self.frame_fence {
+            if fence.is_submitted {
+                self.device.wait_for_fence(&fence.inner, !0);
+                self.device.reset_fence(&fence.inner);
+                fence.is_submitted = false;
+            }
+        }
+
         let bytes_per_pixel = match format {
             ReadPixelsFormat::Standard(imf) => imf.bytes_per_pixel(),
             ReadPixelsFormat::Rgba8 => 4,
@@ -3665,11 +3683,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_next_frame_id(&mut self) {
-        self.device.wait_for_fence(&self.frame_fence[self.next_id], !0);
-        self.device.reset_fence(&self.frame_fence[self.next_id]);
-        self.command_pool[self.next_id].reset();
-        self.descriptor_pools[self.next_id].reset();
-        self.reset_program_buffer_offsets();
         let frame = self.swap_chain
             .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore));
         self.current_frame_id = frame.id();
@@ -3699,7 +3712,8 @@ impl<B: hal::Backend> Device<B> {
                 .wait_on(&[(&self.image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(&self.render_finished_semaphore))
                 .submit(&self.upload_queue);
-            self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.next_id]));
+            self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
+            self.frame_fence[self.next_id].is_submitted = true;
 
             // TODO: replace with semaphore
             //self.device
@@ -3713,26 +3727,27 @@ impl<B: hal::Backend> Device<B> {
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
         self.reset_state();
         self.reset_image_buffer_offsets();
+        if self.frame_fence[self.next_id].is_submitted {
+            self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0);
+            self.device.reset_fence(&self.frame_fence[self.next_id].inner);
+            self.frame_fence[self.next_id].is_submitted = false;
+        }
+        self.command_pool[self.next_id].reset();
+        self.descriptor_pools[self.next_id].reset();
+        self.reset_program_buffer_offsets();
     }
 
-    pub fn wait_for_resources(&mut self) {
-        self.device.wait_for_fences(&self.frame_fence, hal::device::WaitFor::All, !0);
+    pub fn wait_for_resources_and_reset(&mut self) {
+        for fence in &mut self.frame_fence {
+            if fence.is_submitted {
+                self.device.wait_for_fence(&fence.inner, !0);
+                self.device.reset_fence(&fence.inner);
+                fence.is_submitted = false;
+            }
+        }
         for command_pool in &mut self.command_pool {
             command_pool.reset();
         }
-    }
-
-    pub fn submit_and_wait(&mut self) {
-        let fence = self.device.create_fence(false);
-        self.device.reset_fence(&fence);
-        {
-            let submission = Submission::new()
-                .submit(&self.upload_queue);
-            self.queue_group.queues[0].submit(submission, Some(&fence));
-        }
-        self.device.wait_for_fence(&fence, !0);
-        self.device.destroy_fence(fence);
-        self.upload_queue.clear();
     }
 
     pub fn deinit(self) {
@@ -3768,7 +3783,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.render_pass.deinit(&self.device);
         for fence in self.frame_fence {
-            self.device.destroy_fence(fence);
+            self.device.destroy_fence(fence.inner);
         }
         self.device.destroy_semaphore(self.image_available_semaphore);
         self.device.destroy_semaphore(self.render_finished_semaphore);

@@ -1754,8 +1754,6 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
-        device.submit_and_wait();
-
         let mut renderer = Renderer {
             result_rx,
             debug_server,
@@ -3946,7 +3944,7 @@ impl<B: hal::Backend> Renderer<B> {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
-        self.device.wait_for_resources();
+        self.device.wait_for_resources_and_reset();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
