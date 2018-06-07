@@ -51,7 +51,7 @@ pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
-pub const MAX_FRAME_COUNT: usize = 2;
+pub const MAX_FRAME_COUNT: usize = 3;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -1338,13 +1338,12 @@ impl<B: hal::Backend> Program<B> {
                         blend_state,
                     ));
 
-                pipeline_descriptor.depth_stencil = Some(
+                pipeline_descriptor.depth_stencil =
                     hal::pso::DepthStencilDesc {
                         depth: depth_test,
                         depth_bounds: false,
                         stencil: hal::pso::StencilTest::Off,
-                    }
-                );
+                    };
 
                 pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors.clone();
                 pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors.clone();
@@ -1595,6 +1594,7 @@ impl<B: hal::Backend> Program<B> {
             &self.pipeline_layout,
             0,
             Some(desc_pools.get(&self.shader_kind)),
+            &[],
         );
         desc_pools.next(&self.shader_kind);
 
@@ -1791,7 +1791,7 @@ impl<B: hal::Backend> DescPool<B> {
                 max_size,
                 descriptor_range_descriptors.as_slice(),
             );
-        let descriptor_set_layout = device.create_descriptor_set_layout(&descriptor_set_layout);
+        let descriptor_set_layout = device.create_descriptor_set_layout(&descriptor_set_layout, &[]);
         let mut dp = DescPool {
             descriptor_pool,
             descriptor_set: vec!(),
@@ -1867,37 +1867,37 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: 1000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: 1000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: 100,
             }
         ];
 
         let default_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: 2000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: 2000,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: 200,
             }
         ];
 
         DescriptorPools {
             debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 40, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 40, default_range, default_layout),
+            cache_clip_pool: DescPool::new(device, 100, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 200, default_range, default_layout),
         }
     }
 
