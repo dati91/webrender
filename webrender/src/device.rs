@@ -3719,17 +3719,12 @@ impl<B: hal::Backend> Device<B> {
         }
 
         {
-            //self.device.reset_fence(&self.frame_fence[self.next_id]);
             let submission = Submission::new()
                 .wait_on(&[(&self.image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(&self.render_finished_semaphore))
                 .submit(&self.upload_queue);
             self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
             self.frame_fence[self.next_id].is_submitted = true;
-
-            // TODO: replace with semaphore
-            //self.device
-            //    .wait_for_fence(&self.frame_fence[self.next_id], !0);
 
             // present frame
             self.swap_chain

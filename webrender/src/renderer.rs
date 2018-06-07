@@ -2349,8 +2349,6 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             }
 
-            self.device.swap_buffers();
-
             self.unlock_external_images();
             self.active_documents = active_documents;
         });
@@ -2396,8 +2394,6 @@ impl<B: hal::Backend> Renderer<B> {
             //self.device.echo_driver_messages();
         }
 
-        //println!("profile_timers {}", format!("{:.2} ms", profile_timers.cpu_time.get() as f64 / 1000000.0));
-
         self.backend_profile_counters.reset();
         self.profile_counters.reset();
         self.profile_counters.frame_counter.inc();
@@ -2413,6 +2409,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.end_frame();
         });
         self.last_time = current_time;
+
+        self.device.swap_buffers();
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -3482,7 +3480,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         counters.targets_used.inc();
-        //let start = precise_time_ns();
+
         // First, try finding a perfect match
         let selector = TargetSelector {
             size: list.max_size,
@@ -3534,8 +3532,6 @@ impl<B: hal::Backend> Renderer<B> {
         );
 
         list.check_ready(&texture);
-        //let end = precise_time_ns();
-        //println!("used_in_frame {}", end - start);
         Some(ActiveTexture {
             texture,
             saved_index: list.saved_index.clone(),
