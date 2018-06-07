@@ -845,20 +845,20 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind<B: hal::Backend>(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
+    fn bind<B: hal::Backend>(&mut self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
                 let texture = match self.cache_a8_texture {
-                    Some(ref at) => &at.texture,
-                    None => &self.dummy_cache_texture,
+                    Some(ref mut at) => &mut at.texture,
+                    None => &mut self.dummy_cache_texture,
                 };
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::CacheRGBA8 => {
                 let texture = match self.cache_rgba8_texture {
-                    Some(ref at) => &at.texture,
-                    None => &self.dummy_cache_texture,
+                    Some(ref mut at) => &mut at.texture,
+                    None => &mut self.dummy_cache_texture,
                 };
                 device.bind_texture(sampler, texture);
             }
@@ -869,11 +869,11 @@ impl SourceTextureResolver {
                 device.bind_external_texture(sampler, texture);
             }
             SourceTexture::TextureCache(index) => {
-                let texture = &self.cache_texture_map[index.0];
+                let texture = &mut self.cache_texture_map[index.0];
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::RenderTaskCache(saved_index) => {
-                let texture = &self.saved_textures[saved_index.0];
+                let texture = &mut self.saved_textures[saved_index.0];
                 device.bind_texture(sampler, texture)
             }
         }
@@ -2483,7 +2483,7 @@ impl<B: hal::Backend> Renderer<B> {
         // so we need to bind it here.
         self.device.bind_texture(
             TextureSampler::ResourceCache,
-            &self.gpu_cache_texture.texture,
+            &mut self.gpu_cache_texture.texture,
         );
     }
 
@@ -2605,7 +2605,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         // TODO: this probably isn't the best place for this.
-        if let Some(ref texture) = self.dither_matrix_texture {
+        if let Some(ref mut texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
         }
 
@@ -3548,7 +3548,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.set_device_pixel_ratio(frame.device_pixel_ratio);
 
         self.node_data_texture.update(&mut self.device, &mut frame.node_data);
-        self.device.bind_texture(TextureSampler::ClipScrollNodes, &self.node_data_texture.texture);
+        self.device.bind_texture(TextureSampler::ClipScrollNodes, &mut self.node_data_texture.texture);
 
         self.local_clip_rects_texture.update(
             &mut self.device,
@@ -3556,14 +3556,14 @@ impl<B: hal::Backend> Renderer<B> {
         );
         self.device.bind_texture(
             TextureSampler::LocalClipRects,
-            &self.local_clip_rects_texture.texture
+            &mut self.local_clip_rects_texture.texture
         );
 
         self.render_task_texture
             .update(&mut self.device, &mut frame.render_tasks.task_data);
         self.device.bind_texture(
             TextureSampler::RenderTasks,
-            &self.render_task_texture.texture,
+            &mut self.render_task_texture.texture,
         );
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
@@ -3597,7 +3597,7 @@ impl<B: hal::Backend> Renderer<B> {
             //TODO add this upstream
             // Init SharedCacheA8 with dummy texture
             if pass_index == 0 {
-                self.device.bind_texture(TextureSampler::SharedCacheA8, &self.texture_resolver.dummy_cache_texture);
+                self.device.bind_texture(TextureSampler::SharedCacheA8, &mut self.texture_resolver.dummy_cache_texture);
             }
 
             self.texture_resolver.bind(
@@ -3611,7 +3611,7 @@ impl<B: hal::Backend> Renderer<B> {
                 &mut self.device,
             );
 
-            let (cur_alpha, cur_color) = match pass.kind {
+            let (mut cur_alpha, cur_color) = match pass.kind {
                 RenderPassKind::MainFramebuffer(ref target) => {
                     if let Some(framebuffer_size) = framebuffer_size {
                         stats.color_target_count += 1;
@@ -3714,7 +3714,7 @@ impl<B: hal::Backend> Renderer<B> {
             };
 
             //Note: the `end_pass` will make sure this texture is not recycled this frame
-            if let Some(ActiveTexture { ref texture, is_shared: true, .. }) = cur_alpha {
+            if let Some(ActiveTexture { ref mut texture, is_shared: true, .. }) = cur_alpha {
                 self.device
                     .bind_texture(TextureSampler::SharedCacheA8, texture);
             }

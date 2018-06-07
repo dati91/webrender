@@ -2555,11 +2555,12 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn bind_texture<S>(&mut self, sampler: S, texture: &Texture)
+    pub fn bind_texture<S>(&mut self, sampler: S, texture: &mut Texture)
         where
             S: Into<TextureSlot>,
     {
         self.bind_texture_impl(sampler.into(), texture.id, texture.filter);
+        texture.last_frame_used = self.frame_id;
     }
 
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
@@ -2721,7 +2722,7 @@ impl<B: hal::Backend> Device<B> {
             render_target: None,
             fbo_ids: vec![],
             depth_rb: None,
-            last_frame_used: self.frame_id,
+            last_frame_used: FrameId(0),
         }
     }
 
@@ -2755,6 +2756,13 @@ impl<B: hal::Backend> Device<B> {
 
         let is_resized = texture.width != width || texture.height != height;
 
+        if texture.id == 0 {
+            let id = self.generate_texture_id();
+            texture.id = id;
+        } else {
+            self.free_image(texture);
+        }
+
         texture.width = width;
         texture.height = height;
         texture.filter = filter;
@@ -2762,12 +2770,6 @@ impl<B: hal::Backend> Device<B> {
         texture.render_target = render_target;
         texture.last_frame_used = self.frame_id;
 
-        if texture.id == 0 {
-            let id = self.generate_texture_id();
-            texture.id = id;
-        } else {
-            self.free_image(texture);
-        }
         assert_eq!(self.images.contains_key(&texture.id), false);
         let (view_kind, mip_levels) = match texture.filter {
             TextureFilter::Nearest => (hal::image::ViewKind::D2, 1),
@@ -3176,10 +3178,21 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn free_image(&mut self, texture: &mut Texture) {
-        // Note: this is very rare case, but if becomes a problem
+        // Note: this is a very rare case, but if it becomes a problem
         // we need to handle this in renderer.rs
         if texture.used_in_frame(self.frame_id) {
             self.wait_for_resources();
+            let fence = self.device.create_fence(false);
+            self.device.reset_fence(&fence);
+            {
+                let submission = Submission::new()
+                    .submit(&self.upload_queue);
+                self.queue_group.queues[0].submit(submission, Some(&fence));
+            }
+            self.device.wait_for_fence(&fence, !0);
+            self.device.destroy_fence(fence);
+            self.upload_queue.clear();
+            self.reset_command_pools();
         }
         if let Some(depth_rb) = texture.depth_rb.take() {
             let old_rbo = self.rbos.remove(&depth_rb).unwrap();
@@ -3738,10 +3751,9 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn wait_for_resources_and_reset(&mut self) {
         self.wait_for_resources();
-        for command_pool in &mut self.command_pool {
-            command_pool.reset();
-        }
+        self.reset_command_pools();
     }
+
     fn wait_for_resources(&mut self) {
         for fence in &mut self.frame_fence {
             if fence.is_submitted {
@@ -3749,6 +3761,12 @@ impl<B: hal::Backend> Device<B> {
                 self.device.reset_fence(&fence.inner);
                 fence.is_submitted = false;
             }
+        }
+    }
+
+    fn reset_command_pools(&mut self) {
+        for command_pool in &mut self.command_pool {
+            command_pool.reset();
         }
     }
 

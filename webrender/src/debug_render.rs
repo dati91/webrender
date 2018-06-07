@@ -280,7 +280,7 @@ impl DebugRenderer {
             if !self.font_indices.is_empty() {
                 device.bind_program(self.font_program);
                 device.set_uniforms(&projection);
-                device.bind_texture(DebugSampler::Font, &self.font_texture);
+                device.bind_texture(DebugSampler::Font, &mut self.font_texture);
                 device.update_indices(self.font_indices.as_slice());
                 device.update_vertices(&self.font_vertices);
                 device.bind_textures();
