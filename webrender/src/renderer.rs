@@ -21,7 +21,7 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind, TransformBatchKind};
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
 use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PrimitiveType};
-use device::{ExternalTexture, FBOId, TextureSlot};
+use device::{ExternalTexture, FBOId, TextureSlot, DitherMatrixTexture};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
 use device::{VertexUsageHint, VAO, PBO, ProgramCache};
 use device::{VertexArrayKind};
@@ -1391,7 +1391,7 @@ pub struct Renderer<B: hal::Backend> {
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
 
-    dither_matrix_texture: Option<Texture>,
+    dither_matrix_texture: Option<DitherMatrixTexture>,
 
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
@@ -1523,85 +1523,7 @@ impl<B: hal::Backend> Renderer<B> {
         let backend_profile_counters = BackendProfileCounters::new();
 
         let dither_matrix_texture = if options.enable_dithering {
-            let dither_matrix: [u8; 64] = [
-                42,
-                26,
-                38,
-                22,
-                41,
-                25,
-                37,
-                21,
-                10,
-                58,
-                06,
-                54,
-                09,
-                57,
-                05,
-                53,
-                34,
-                18,
-                46,
-                30,
-                33,
-                17,
-                45,
-                29,
-                02,
-                50,
-                14,
-                62,
-                01,
-                49,
-                13,
-                61,
-                40,
-                24,
-                36,
-                20,
-                43,
-                27,
-                39,
-                23,
-                08,
-                56,
-                04,
-                52,
-                11,
-                59,
-                07,
-                55,
-                32,
-                16,
-                44,
-                28,
-                35,
-                19,
-                47,
-                31,
-                00,
-                48,
-                12,
-                60,
-                03,
-                51,
-                15,
-                63
-            ];
-            let mut texture = device
-                .create_texture(TextureTarget::Default, ImageFormat::R8);
-            device.init_texture(
-                &mut texture,
-                8,
-                8,
-                TextureFilter::Nearest,
-                None,
-                1,
-                Some(&dither_matrix),
-            );
-
-            Some(texture)
+            Some(DitherMatrixTexture::new(&mut device))
         } else {
             None
         };
@@ -2631,7 +2553,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         // TODO: this probably isn't the best place for this.
         if let Some(ref texture) = self.dither_matrix_texture {
-            self.device.bind_texture(TextureSampler::Dither, texture);
+            self.device.bind_texture(TextureSampler::Dither, texture.get());
         }
 
         self.device.bind_textures();
@@ -3630,6 +3552,9 @@ impl<B: hal::Backend> Renderer<B> {
 
             let (cur_alpha, cur_color) = match pass.kind {
                 RenderPassKind::MainFramebuffer(ref target) => {
+                    if let Some(ref mut texture) = self.dither_matrix_texture {
+                       texture.set(true);
+                    }
                     if let Some(framebuffer_size) = framebuffer_size {
                         stats.color_target_count += 1;
 
@@ -3660,6 +3585,9 @@ impl<B: hal::Backend> Renderer<B> {
                     (None, None)
                 }
                 RenderPassKind::OffScreen { ref mut alpha, ref mut color, ref mut texture_cache } => {
+                    if let Some(ref mut texture) = self.dither_matrix_texture {
+                        texture.set(false);
+                    }
                     let alpha_tex = self.allocate_target_texture(alpha, &mut frame.profile_counters, frame_id);
                     let color_tex = self.allocate_target_texture(color, &mut frame.profile_counters, frame_id);
 
@@ -3964,7 +3892,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.wait_for_resources_and_reset();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
-            self.device.delete_texture(dither_matrix_texture);
+            dither_matrix_texture.deinit(&mut self.device);
         }
         self.node_data_texture.deinit(&mut self.device);
         self.local_clip_rects_texture.deinit(&mut self.device);

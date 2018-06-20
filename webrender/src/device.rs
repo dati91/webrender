@@ -177,6 +177,196 @@ pub struct VertexDescriptor {
     pub instance_attributes: &'static [VertexAttribute],
 }
 
+pub struct DitherMatrixTexture {
+    matrix_texture: Texture,
+    matrix_texture_flipped: Texture,
+    in_main_framebuffer_pass: bool,
+}
+
+impl DitherMatrixTexture {
+    pub fn new<B: hal::Backend>(device: &mut Device<B>) -> DitherMatrixTexture {
+        let dither_matrix: [u8; 64] = [
+            00,
+            48,
+            12,
+            60,
+            03,
+            51,
+            15,
+            63,
+            32,
+            16,
+            44,
+            28,
+            35,
+            19,
+            47,
+            31,
+            08,
+            56,
+            04,
+            52,
+            11,
+            59,
+            07,
+            55,
+            40,
+            24,
+            36,
+            20,
+            43,
+            27,
+            39,
+            23,
+            02,
+            50,
+            14,
+            62,
+            01,
+            49,
+            13,
+            61,
+            34,
+            18,
+            46,
+            30,
+            33,
+            17,
+            45,
+            29,
+            10,
+            58,
+            06,
+            54,
+            09,
+            57,
+            05,
+            53,
+            42,
+            26,
+            38,
+            22,
+            41,
+            25,
+            37,
+            21,
+        ];
+
+        let mut texture = device
+            .create_texture(TextureTarget::Default, ImageFormat::R8);
+        device.init_texture(
+            &mut texture,
+            8,
+            8,
+            TextureFilter::Nearest,
+            None,
+            1,
+            Some(&dither_matrix),
+        );
+
+        let dither_matrix_flipped: [u8; 64] = [
+            42,
+            26,
+            38,
+            22,
+            41,
+            25,
+            37,
+            21,
+            10,
+            58,
+            06,
+            54,
+            09,
+            57,
+            05,
+            53,
+            34,
+            18,
+            46,
+            30,
+            33,
+            17,
+            45,
+            29,
+            02,
+            50,
+            14,
+            62,
+            01,
+            49,
+            13,
+            61,
+            40,
+            24,
+            36,
+            20,
+            43,
+            27,
+            39,
+            23,
+            08,
+            56,
+            04,
+            52,
+            11,
+            59,
+            07,
+            55,
+            32,
+            16,
+            44,
+            28,
+            35,
+            19,
+            47,
+            31,
+            00,
+            48,
+            12,
+            60,
+            03,
+            51,
+            15,
+            63
+        ];
+
+        let mut texture_flipped = device
+            .create_texture(TextureTarget::Default, ImageFormat::R8);
+        device.init_texture(
+            &mut texture_flipped,
+            8,
+            8,
+            TextureFilter::Nearest,
+            None,
+            1,
+            Some(&dither_matrix_flipped),
+        );
+        DitherMatrixTexture {
+            matrix_texture: texture,
+            matrix_texture_flipped: texture_flipped,
+            in_main_framebuffer_pass: false,
+        }
+    }
+
+    pub fn get(&self) -> &Texture {
+        if self.in_main_framebuffer_pass {
+            &self.matrix_texture_flipped
+        } else {
+            &self.matrix_texture
+        }
+    }
+
+    pub fn set(&mut self, in_main_framebuffer_pass: bool) {
+        self.in_main_framebuffer_pass = in_main_framebuffer_pass;
+    }
+
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
+        device.delete_texture(self.matrix_texture);
+        device.delete_texture(self.matrix_texture_flipped);
+    }
+}
+
 pub trait PrimitiveType {
     type Primitive: Clone + Copy;
     fn to_primitive_type(&self) -> Self::Primitive;
