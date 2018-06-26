@@ -959,6 +959,7 @@ impl<B: hal::Backend> Buffer<B> {
     ) {
         //TODO:
         //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
+        println!("buffer update range={:?} self.data_stride={:?} self.data_len={:?}", buffer_offset .. (buffer_offset + buffer_width), self.data_stride, self.data_len);
         let mut data = device
             .acquire_mapping_writer::<T>(
                 &self.memory,
@@ -3789,7 +3790,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn set_next_frame_id(&mut self) {
         self.current_frame_id = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
+            .acquire_image(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
     }
 
     pub fn swap_buffers(&mut self) {
@@ -3820,7 +3821,7 @@ impl<B: hal::Backend> Device<B> {
 
             // present frame
             self.swap_chain
-                .present(&mut self.queue_group.queues[0], self.current_frame_id as _, Some(&self.render_finished_semaphore));
+                .present(&mut self.queue_group.queues[0], self.current_frame_id as _, Some(&self.render_finished_semaphore)).ok();
         }
         self.upload_queue.clear();
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
