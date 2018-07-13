@@ -555,7 +555,7 @@ fn main() {
         (None, None)
     };
 
-    #[cfg(feature = "gfx")]
+    /*#[cfg(feature = "gfx")]
     let (adapter, mut surface) = {
         let instance = back::Instance::create("gfx-rs instance", 1);
         let mut adapters = instance.enumerate_adapters();
@@ -569,7 +569,7 @@ fn main() {
         adapter: &adapter,
         surface: &mut surface,
         window_size: (dim.width, dim.height),
-    };
+    };*/
 
     #[cfg(feature = "gl")]
     let init = webrender::RendererInit {
@@ -593,7 +593,7 @@ fn main() {
         zoom_factor.unwrap_or(1.0),
         chase_primitive,
         notifier,
-        init,
+        //init,
     );
 
     if let Some(subargs) = args.subcommand_matches("show") {

@@ -166,7 +166,8 @@ pub fn main_wrapper<E: Example>(
         (gl, init, window)
     };
 
-    #[cfg(feature = "gfx-hal")]
+    let window = window_builder.build(&events_loop).unwrap();
+    /*#[cfg(feature = "gfx-hal")]
     let (window, adapter, mut surface) = {
         let window = window_builder.build(&events_loop).unwrap();
         let instance = back::Instance::create("gfx-rs instance", 1);
@@ -174,16 +175,16 @@ pub fn main_wrapper<E: Example>(
         let adapter = adapters.remove(0);
         let mut surface = instance.create_surface(&window);
         (window, adapter, surface)
-    };
+    };*/
 
     let (width, height) = window.get_inner_size().unwrap();
 
-    #[cfg(feature = "gfx-hal")]
+    /*#[cfg(feature = "gfx-hal")]
     let init = webrender::RendererInit {
         adapter: &adapter,
         surface: &mut surface,
         window_size: (width, height),
-    };
+    };*/
 
     println!("Shader resource path: {:?}", res_path);
     let device_pixel_ratio = window.hidpi_factor();
@@ -202,7 +203,7 @@ pub fn main_wrapper<E: Example>(
 
     let framebuffer_size = DeviceUintSize::new(width, height);
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(notifier, opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 

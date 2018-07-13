@@ -43,7 +43,16 @@ time = "0.1"
 webrender_api = {path = "../webrender_api"}
 ws = { optional = true, version = "0.7.3" }
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", features = ["serde"] }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git" }
 rand ="0.4"
+x11-dl = "2"
+
+[dependencies.x11]
+features = [
+    "xlib",
+    "xtst",
+]
+version = "2.17.2"
 
 [dependencies.pathfinder_font_renderer]
 git = "https://github.com/pcwalton/pathfinder"
