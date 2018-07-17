@@ -514,7 +514,9 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
     // Bind a source texture to the device.
     fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
         match *texture_id {
-            SourceTexture::Invalid => {}
+            SourceTexture::Invalid => {
+                device.bind_texture(sampler, &self.dummy_cache_texture);
+            }
             SourceTexture::CacheA8 => {
                 let texture = match self.cache_a8_texture {
                     Some(ref at) => &at.texture,

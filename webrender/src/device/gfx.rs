@@ -1019,8 +1019,8 @@ impl<B: hal::Backend> Program<B> {
                 ShaderKind::Text => vec![
                     (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
                     (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
-                    (SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
-                    (SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
+                    //(SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
+                    //(SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
                     (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
                     (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
                     (SUBPIXEL_PASS0, DepthTest::Off),
@@ -1759,6 +1759,7 @@ impl<B: hal::Backend> Device<B> {
                 height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
             }
         );
+        println!("extent={:?}", extent);
 
         let memory_types = adapter
             .physical_device

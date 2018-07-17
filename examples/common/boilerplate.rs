@@ -136,7 +136,7 @@ pub fn main_wrapper<E: Example>(
     let window_builder = winit::WindowBuilder::new()
         .with_title(E::TITLE)
         .with_multitouch()
-        .with_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
+        .with_min_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
 
     #[cfg(feature = "gl")]
     let (gl, init, window) = {
@@ -181,17 +181,17 @@ pub fn main_wrapper<E: Example>(
     };
 
     let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
+    let device_pixel_ratio = window.get_hidpi_factor() as f32;
+    println!("Device pixel ratio: {}", device_pixel_ratio);
 
     #[cfg(feature = "gfx-hal")]
     let init = webrender::RendererInit {
         adapter: &adapter,
         surface: &mut surface,
-        window_size: (width as u32, height as u32),
+        window_size: ((width * device_pixel_ratio as f64) as u32, (height * device_pixel_ratio as f64) as u32),
     };
 
     println!("Shader resource path: {:?}", res_path);
-    let device_pixel_ratio = window.get_hidpi_factor() as f32;
-    println!("Device pixel ratio: {}", device_pixel_ratio);
 
     println!("Loading shaders...");
     let opts = webrender::RendererOptions {

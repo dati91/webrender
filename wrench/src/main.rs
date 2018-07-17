@@ -390,12 +390,12 @@ fn make_window(
     let gl_version = wrapper.gl().get_string(gl::VERSION);
     let gl_renderer = wrapper.gl().get_string(gl::RENDERER);
 
-    let dp_ratio = dp_ratio.unwrap_or(wrapper.hidpi_factor());
+    let dp_ratio = dp_ratio.unwrap_or(wrapper.get_hidpi_factor());
     println!("OpenGL version {}, {}", gl_version, gl_renderer);
     println!(
         "hidpi factor: {} (native {})",
         dp_ratio,
-        wrapper.hidpi_factor()
+        wrapper.get_hidpi_factor()
     );
 
     wrapper
@@ -417,6 +417,7 @@ fn make_window(
                 .with_multitouch()
                 .with_min_dimensions(lsize)
                 .build(events_loop).unwrap();
+            println!("window.get_inner_size()={:?}, lsize={:?}", window.get_inner_size().unwrap(), lsize);
             assert!(window.get_inner_size().unwrap() == lsize);
             return WindowWrapper::Window(window);
         },
@@ -552,7 +553,7 @@ fn main() {
     let mut window = make_window(
         size, dp_ratio, args.is_present("vsync"), &events_loop, args.is_present("angle"),
     );
-    let dp_ratio = dp_ratio.unwrap_or(window.hidpi_factor());
+    let dp_ratio = dp_ratio.unwrap_or(1.0 /*window.get_hidpi_factor()*/);
     let dim = window.get_inner_size();
 
     let needs_frame_notifier = ["perf", "reftest", "png", "rawtest"]

@@ -24,7 +24,8 @@
     #endif
 #else
     #define HIGHP_SAMPLER_FLOAT
-    #define TEXEL_FETCH(sampler, position, lod, offset) texelFetchOffset(sampler, position, lod, offset)
+    //#define TEXEL_FETCH(sampler, position, lod, offset) texelFetchOffset(sampler, position, lod, offset)
+    #define TEXEL_FETCH(sampler, position, lod, offset) texelFetch(sampler, position + offset, lod)
 #endif
 
 #ifdef WR_VERTEX_SHADER
