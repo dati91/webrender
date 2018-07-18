@@ -580,7 +580,7 @@ impl<B: hal::Backend> Image<B> {
         layer_index: i32,
         image_data: &[u8],
         offset_alignment: usize,
-    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary>
     {
         //let (image_width, image_height, _, _) = self.kind.dimensions();
         let pos = rect.origin;
@@ -1275,7 +1275,7 @@ impl<B: hal::Backend> Program<B> {
         depth_test: DepthTest,
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
-    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(0, &[viewport.clone()]);
@@ -1675,7 +1675,7 @@ pub struct Device<B: hal::Backend> {
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
+    pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary>>,
     pub current_frame_id: usize,
     current_blend_state: BlendState,
     blend_color: ColorF,
@@ -2927,12 +2927,11 @@ impl<B: hal::Backend> Device<B> {
             self.device.reset_fence(&fence);
             {
                 let submission = Submission::new()
-                    .submit(&self.upload_queue);
+                    .submit(self.upload_queue.drain(..));
                 self.queue_group.queues[0].submit(submission, Some(&fence));
             }
             self.device.wait_for_fence(&fence, !0);
             self.device.destroy_fence(fence);
-            self.upload_queue.clear();
             self.reset_command_pools();
         }
         if let Some(depth_rb) = texture.depth_rb.take() {
@@ -3578,7 +3577,7 @@ impl<B: hal::Backend> Device<B> {
             let submission = Submission::new()
                 .wait_on(&[(&self.image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(&self.render_finished_semaphore))
-                .submit(&self.upload_queue);
+                .submit(self.upload_queue.drain(..));
             self.queue_group.queues[0].submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
             self.frame_fence[self.next_id].is_submitted = true;
 
@@ -3589,7 +3588,6 @@ impl<B: hal::Backend> Device<B> {
                     self.current_frame_id as _,
                     Some(&self.render_finished_semaphore)).unwrap();
         }
-        self.upload_queue.clear();
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
         self.reset_state();
         self.reset_image_buffer_offsets();
