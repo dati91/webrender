@@ -143,7 +143,7 @@ pub fn main_wrapper<E: Example>(
         .with_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
 
     #[cfg(feature = "gl")]
-    let (gl, init, window) = {
+    let (gl, mut init, window) = {
         let context_builder = glutin::ContextBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
@@ -167,7 +167,7 @@ pub fn main_wrapper<E: Example>(
         };
 
         println!("OpenGL version {}", gl.get_string(gl::VERSION));
-        let init: webrender::RendererInit<back::Backend> = webrender::RendererInit {
+        let init: webrender::DeviceInit<back::Backend> = webrender::DeviceInit {
             gl: gl.clone(),
             phantom_data: PhantomData,
         };
@@ -175,22 +175,22 @@ pub fn main_wrapper<E: Example>(
     };
 
     #[cfg(feature = "gfx-hal")]
-    let (window, adapter, mut surface) = {
+    let (window, adapter, surface, instance) = {
         let window = window_builder.build(&events_loop).unwrap();
         let instance = back::Instance::create("gfx-rs instance", 1);
         let mut adapters = instance.enumerate_adapters();
         let adapter = adapters.remove(0);
         let mut surface = instance.create_surface(&window);
-        (window, adapter, surface)
+        (window, adapter, surface, instance)
     };
 
     #[cfg(feature = "gfx-hal")]
     let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
 
     #[cfg(feature = "gfx-hal")]
-    let init = webrender::RendererInit {
+    let init = webrender::DeviceInit {
         adapter: &adapter,
-        surface: &mut surface,
+        surface: surface,
         window_size: (width as u32, height as u32),
     };
 
@@ -319,6 +319,19 @@ pub fn main_wrapper<E: Example>(
                         document_id,
                     )
                 },
+            },
+            #[cfg(feature = "gfx-hal")]
+            winit::Event::WindowEvent {
+                event: winit::WindowEvent::Resized(dims),
+                ..
+            } => {
+                let init = webrender::DeviceInit {
+                    adapter: &adapter,
+                    surface: instance.create_surface(&window),
+                    window_size: (dims.width as u32, dims.height as u32),
+                };
+
+                renderer.resize(init);
             },
             winit::Event::WindowEvent { event, .. } => custom_event = example.on_event(
                 event,

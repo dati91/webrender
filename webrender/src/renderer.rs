@@ -22,7 +22,7 @@ use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
 use device::desc;
 use device::{create_projection, DepthFunction, Device, ExternalTexture, FBOId, FileWatcherHandler, FrameId};
-use device::{PBO, PrimitiveType, ProgramCache, ShaderError, ReadPixelsFormat, RendererInit};
+use device::{PBO, PrimitiveType, ProgramCache, ShaderError, ReadPixelsFormat, DeviceInit};
 use device::{Texture, TextureSampler, TextureFilter, UploadMethod, VertexArrayKind, VertexUsageHint, VAO};
 #[cfg(feature = "gleam")]
 use device::{CustomVAO, Program, VBO};
@@ -1186,7 +1186,7 @@ impl<B: hal::Backend> Renderer<B>
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        init: RendererInit<B>,
+        init: DeviceInit<B>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {
@@ -1693,13 +1693,18 @@ impl<B: hal::Backend> Renderer<B>
         }
     }
 
+    #[cfg(not(feature = "gleam"))]
+    pub fn resize(&mut self, init: DeviceInit<B>,) {
+        self.shaders.reset();
+        self.device.recreate_swapchain(init);
+    }
+
     #[cfg(not(feature = "debugger"))]
     fn get_screenshot_for_debugger(&mut self) -> String {
         // Avoid unused param warning.
         let _ = &self.debug_server;
         String::new()
     }
-
 
     #[cfg(feature = "debugger")]
     fn get_screenshot_for_debugger(&mut self) -> String {

@@ -73,9 +73,9 @@ cfg_if! {
     }
 }
 
-pub struct RendererInit<'a, B: hal::Backend> {
+pub struct DeviceInit<'a, B: hal::Backend> {
     pub adapter: &'a hal::Adapter<B>,
-    pub surface: &'a mut B::Surface,
+    pub surface: B::Surface,
     pub window_size: (u32, u32),
 }
 
@@ -1662,16 +1662,17 @@ pub struct Device<B: hal::Backend> {
     pub upload_memory_type: hal::MemoryTypeId,
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
+    surface: B::Surface,
     pub surface_format: hal::format::Format,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
-    pub swap_chain: B::Swapchain,
-    pub render_pass: RenderPass<B>,
+    pub swap_chain: Option<B::Swapchain>,
+    pub render_pass: Option<RenderPass<B>>,
     pub framebuffers: Vec<B::Framebuffer>,
     pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
-    pub frame_depth: DepthBuffer<B>,
+    pub frame_depth: Option<DepthBuffer<B>>,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1729,36 +1730,15 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
-        init: RendererInit<B>,
+        init: DeviceInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
     ) -> Self {
-        let (adapter, surface, window_size) = (init.adapter, init.surface, init.window_size);
+        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
-
-        let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
-        let surface_format = formats
-            .map_or(
-                hal::format::Format::Bgra8Unorm,
-                |formats| {
-                    formats
-                        .into_iter()
-                        .find(|format| {
-                            format == &hal::format::Format::Bgra8Unorm
-                        })
-                        .unwrap()
-                },
-            );
-
-        let extent = caps.current_extent.unwrap_or(
-            hal::window::Extent2D {
-                width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
-                height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
-            }
-        );
 
         let memory_types = adapter
             .physical_device
@@ -1799,19 +1779,235 @@ impl<B: hal::Backend> Device<B> {
             .take(queue_family.id())
             .unwrap();
 
-        println!("{:?}", surface_format);
-        assert_eq!(surface_format, hal::format::Format::Bgra8Unorm);
-        let swap_config =
-            SwapchainConfig::new()
-                .with_color(surface_format)
-                .with_image_count(MAX_FRAME_COUNT as _)
-                .with_image_usage(
-                    hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
-                );
+        let (
+            swap_chain,
+            surface_format,
+            depth_format,
+            render_pass,
+            framebuffers,
+            framebuffers_depth,
+            frame_depth,
+            frame_images,
+            viewport
+        ) = Device::init_swapchain_resources(&device, &memory_types, &adapter, &mut surface, window_size);
+
+        // Samplers
+
+        let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::Filter::Linear,
+            hal::image::WrapMode::Clamp,
+        ));
+
+        let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::Filter::Nearest,
+            hal::image::WrapMode::Clamp,
+        ));
+
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+        let pipeline_requirements: HashMap<String, PipelineRequirements> =
+            from_reader(file).expect("Failed to load shader_bindings.ron");
+
+        let mut descriptor_pools = SmallVec::new();
+        let mut frame_fence = SmallVec::new();
+        let mut command_pool = SmallVec::new();
+        for _ in 0..MAX_FRAME_COUNT {
+            descriptor_pools.push(
+                DescriptorPools::new(
+                    &device,
+                    pipeline_requirements.get("debug_color").expect("debug_color missing").descriptor_set_layouts.clone(),
+                    pipeline_requirements.get("cs_clip_rectangle_transform").expect("cs_clip_rectangle_transform missing").descriptor_set_layouts.clone(),
+                    pipeline_requirements.get("brush_solid").expect("brush_solid missing").descriptor_set_layouts.clone(),
+                )
+            );
+
+            let fence = device.create_fence(false);
+            frame_fence.push(
+                Fence {
+                    inner: fence,
+                    is_submitted: false,
+                }
+            );
+
+            let mut cp = device.create_command_pool_typed(
+                &queue_group,
+                hal::pool::CommandPoolCreateFlags::empty(),
+                64,
+            );
+            cp.reset();
+            command_pool.push(
+                cp
+            );
+        }
+
+        let image_available_semaphore = device.create_semaphore();
+        let render_finished_semaphore = device.create_semaphore();
+
+        Device {
+            device,
+            limits,
+            memory_types,
+            upload_memory_type,
+            download_memory_type,
+            surface_format,
+            surface,
+            depth_format,
+            queue_group,
+            command_pool,
+            swap_chain: Some(swap_chain),
+            render_pass: Some(render_pass),
+            framebuffers,
+            framebuffers_depth,
+            frame_images,
+            frame_depth: Some(frame_depth),
+            viewport,
+            sampler_linear,
+            sampler_nearest,
+            upload_queue: Vec::new(),
+            current_frame_id: 0,
+            current_blend_state: BlendState::Off,
+            current_depth_test: DepthTest::Off,
+            blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
+            _resource_override_path: resource_override_path,
+            // This is initialized to 1 by default, but it is reset
+            // at the beginning of each frame in `Renderer::bind_frame_data`.
+            device_pixel_ratio: 1.0,
+            upload_method,
+            inside_frame: false,
+
+            #[cfg(feature = "debug_renderer")]
+            capabilities: Capabilities {
+                supports_multisampling: false, //TODO
+            },
+
+            programs: FastHashMap::default(),
+            images: FastHashMap::default(),
+            fbos: FastHashMap::default(),
+            rbos: FastHashMap::default(),
+            descriptor_pools,
+            bound_textures: [0; 16],
+            bound_program: INVALID_PROGRAM_ID,
+            bound_sampler: [TextureFilter::Linear; 16],
+            bound_read_fbo: DEFAULT_READ_FBO,
+            bound_draw_fbo: DEFAULT_DRAW_FBO,
+            program_mode_id: 0,
+            scissor_rect: None,
+
+            max_texture_size,
+            _renderer_name: renderer_name,
+            frame_id: FrameId(0),
+            features,
+
+            next_id: 0,
+            frame_fence,
+            image_available_semaphore,
+            render_finished_semaphore,
+            pipeline_requirements,
+        }
+    }
+
+    pub(crate) fn recreate_swapchain(&mut self, init: DeviceInit<B>) {
+        self.device.wait_idle().unwrap();
+        self.reset_command_pools();
+        // Maybe call other reset functions as well?
+
+        for (_id, program) in self.programs.drain() {
+            program.deinit(&self.device);
+        }
+
+        for image in self.frame_images.drain(..) {
+            image.deinit(&self.device);
+        }
+
+        self.frame_depth.take().unwrap().deinit(&self.device);
+
+        for framebuffer in self.framebuffers.drain(..) {
+            self.device.destroy_framebuffer(framebuffer);
+        }
+        for framebuffer_depth in self.framebuffers_depth.drain(..) {
+            self.device.destroy_framebuffer(framebuffer_depth);
+        }
+
+        self.render_pass.take().unwrap().deinit(&self.device);
+
+        self.device.destroy_swapchain(self.swap_chain.take().unwrap());
+
+        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
+
+        let (
+            swap_chain,
+            _surface_format,
+            _depth_format,
+            render_pass,
+            framebuffers,
+            framebuffers_depth,
+            frame_depth,
+            frame_images,
+            viewport
+        ) = Device::init_swapchain_resources(&self.device, &self.memory_types, &adapter, &mut surface, window_size);
+
+        self.surface = surface;
+        self.swap_chain = Some(swap_chain);
+        self.render_pass = Some(render_pass);
+        self.framebuffers = framebuffers;
+        self.framebuffers_depth = framebuffers_depth;
+        self.frame_depth = Some(frame_depth);
+        self.frame_images = frame_images;
+        self.viewport = viewport;
+    }
+
+    fn init_swapchain_resources(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        adapter: &hal::Adapter<B>,
+        surface: &mut B::Surface,
+        window_size: (u32, u32),
+    ) -> (
+        B::Swapchain,
+        hal::format::Format,
+        hal::format::Format,
+        RenderPass<B>,
+        Vec<B::Framebuffer>,
+        Vec<B::Framebuffer>,
+        DepthBuffer<B>,
+        Vec<ImageCore<B>>,
+        hal::pso::Viewport,
+    ) {
+        let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
+        let surface_format = formats
+            .map_or(
+                hal::format::Format::Bgra8Unorm,
+                |formats| {
+                    formats
+                        .into_iter()
+                        .find(|format| {
+                            format == &hal::format::Format::Bgra8Unorm
+                        })
+                        .unwrap()
+                },
+            );
+
+        let mut extent = caps.current_extent.unwrap_or(
+            hal::window::Extent2D {
+                width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
+                height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
+            }
+        );
+
+        //TODO: Implement headless mode and use it if we have zero size
+        if extent.width == 0 { extent.width = 1; }
+        if extent.height == 0 { extent.height = 1; }
+
+        let swap_config = SwapchainConfig::new()
+            .with_color(surface_format)
+            .with_image_count(MAX_FRAME_COUNT as _)
+            .with_image_usage(
+                hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
+            );
+
         let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config, None, &extent);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
-
         let render_pass = {
             let attachment_r8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::R8Unorm),
@@ -1895,7 +2091,7 @@ impl<B: hal::Backend> Device<B> {
             }
         };
 
-        let frame_depth = DepthBuffer::new(&device, &memory_types, extent.width, extent.height, depth_format);
+        let frame_depth = DepthBuffer::new(device, &memory_types, extent.width, extent.height, depth_format);
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
@@ -1908,7 +2104,7 @@ impl<B: hal::Backend> Device<B> {
                 let cores = images
                     .into_iter()
                     .map(|image| {
-                        ImageCore::from_image(&device, image, hal::image::ViewKind::D2Array, surface_format, COLOR_RANGE.clone())
+                        ImageCore::from_image(device, image, hal::image::ViewKind::D2Array, surface_format, COLOR_RANGE.clone())
                     })
                     .collect::<Vec<_>>();
                 let fbos = cores
@@ -1952,122 +2148,8 @@ impl<B: hal::Backend> Device<B> {
             depth: 0.0 .. 1.0,
         };
 
-        // Samplers
-
-        let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
-            hal::image::Filter::Linear,
-            hal::image::WrapMode::Clamp,
-        ));
-
-        let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
-            hal::image::Filter::Nearest,
-            hal::image::WrapMode::Clamp,
-        ));
-
-        let file =
-            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
-        let pipeline_requirements: HashMap<String, PipelineRequirements> =
-            from_reader(file).expect("Failed to load shader_bindings.ron");
-
-        let mut descriptor_pools = SmallVec::new();
-        let mut frame_fence = SmallVec::new();
-        let mut command_pool = SmallVec::new();
-        for _ in 0..MAX_FRAME_COUNT {
-            descriptor_pools.push(
-                DescriptorPools::new(
-                    &device,
-                    pipeline_requirements.get("debug_color").expect("debug_color missing").descriptor_set_layouts.clone(),
-                    pipeline_requirements.get("cs_clip_rectangle_transform").expect("cs_clip_rectangle_transform missing").descriptor_set_layouts.clone(),
-                    pipeline_requirements.get("brush_solid").expect("brush_solid missing").descriptor_set_layouts.clone(),
-                )
-            );
-
-            let fence = device.create_fence(false);
-            frame_fence.push(
-                Fence {
-                    inner: fence,
-                    is_submitted: false,
-                }
-            );
-
-            let mut cp = device.create_command_pool_typed(
-                &queue_group,
-                hal::pool::CommandPoolCreateFlags::empty(),
-                64,
-            );
-            cp.reset();
-            command_pool.push(
-                cp
-            );
-        }
-
-        let image_available_semaphore = device.create_semaphore();
-        let render_finished_semaphore = device.create_semaphore();
-
-        let file =
-            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open shader_bindings.ron");
-        let pipeline_requirements = from_reader(file).expect("Failed to load shader_bindings.ron");
-
-        Device {
-            device,
-            limits,
-            memory_types,
-            upload_memory_type,
-            download_memory_type,
-            surface_format,
-            depth_format,
-            queue_group,
-            command_pool,
-            swap_chain,
-            render_pass,
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depth,
-            viewport,
-            sampler_linear,
-            sampler_nearest,
-            upload_queue: Vec::new(),
-            current_frame_id: 0,
-            current_blend_state: BlendState::Off,
-            current_depth_test: DepthTest::Off,
-            blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
-            _resource_override_path: resource_override_path,
-            // This is initialized to 1 by default, but it is reset
-            // at the beginning of each frame in `Renderer::bind_frame_data`.
-            device_pixel_ratio: 1.0,
-            upload_method,
-            inside_frame: false,
-
-            #[cfg(feature = "debug_renderer")]
-            capabilities: Capabilities {
-                supports_multisampling: false, //TODO
-            },
-
-            programs: FastHashMap::default(),
-            images: FastHashMap::default(),
-            fbos: FastHashMap::default(),
-            rbos: FastHashMap::default(),
-            descriptor_pools,
-            bound_textures: [0; 16],
-            bound_program: INVALID_PROGRAM_ID,
-            bound_sampler: [TextureFilter::Linear; 16],
-            bound_read_fbo: DEFAULT_READ_FBO,
-            bound_draw_fbo: DEFAULT_DRAW_FBO,
-            program_mode_id: 0,
-            scissor_rect: None,
-
-            max_texture_size,
-            _renderer_name: renderer_name,
-            frame_id: FrameId(0),
-            features,
-
-            next_id: 0,
-            frame_fence,
-            image_available_semaphore,
-            render_finished_semaphore,
-            pipeline_requirements,
-        }
+        (swap_chain, surface_format, depth_format, render_pass,
+         framebuffers, framebuffers_depth, frame_depth, frame_images, viewport)
     }
 
     pub(crate) fn bound_program(&self) -> ProgramId { self.bound_program }
@@ -2130,14 +2212,14 @@ impl<B: hal::Backend> Device<B> {
             }
         }
         let program = Program::create(
-            self.pipeline_requirements.remove(&name)
-                    .expect(&format!("Can't load pipeline data for: {}!", name)),
+            self.pipeline_requirements.get(&name)
+                    .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
             &self.device,
             self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]),
             &self.memory_types,
             &name,
             shader_kind.clone(),
-            &self.render_pass,
+            self.render_pass.as_ref().unwrap(),
         );
 
         let id = self.generate_program_id();
@@ -2254,7 +2336,7 @@ impl<B: hal::Backend> Device<B> {
                     (&self.framebuffers_depth[self.current_frame_id], ImageFormat::BGRA8)
                 }
             };
-            let rp = self.render_pass.get_render_pass(format, self.current_depth_test != DepthTest::Off);
+            let rp = self.render_pass.as_ref().unwrap().get_render_pass(format, self.current_depth_test != DepthTest::Off);
             self.programs.get_mut(&self.bound_program).expect("Program not found").submit(
                 &mut self.command_pool[self.next_id],
                 self.viewport.clone(),
@@ -2586,7 +2668,7 @@ impl<B: hal::Backend> Device<B> {
                     Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
                     None => (RBOId(0), None)
                 };
-                let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(), depth);
+                let fbo = Framebuffer::new(&self.device, &texture, &img, i, self.render_pass.as_ref().unwrap(), rbo_id.clone(), depth);
                 self.fbos.insert(new_fbos[i as usize], fbo);
                 texture.fbo_ids.push(new_fbos[i as usize]);
             }
@@ -3318,7 +3400,7 @@ impl<B: hal::Backend> Device<B> {
                 }
             };
 
-            let render_pass = self.render_pass.get_render_pass(format, has_depth);
+            let render_pass = self.render_pass.as_ref().unwrap().get_render_pass(format, has_depth);
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
             {
                 let mut encoder = cmd_buffer.begin_render_pass_inline(
@@ -3351,7 +3433,7 @@ impl<B: hal::Backend> Device<B> {
             };
             (&img.core, fbo.layer_index, dimg)
         } else {
-            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.core))
+            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.as_ref().unwrap().core))
         };
 
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
@@ -3551,7 +3633,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_next_frame_id(&mut self) {
-        self.current_frame_id = self.swap_chain
+        self.current_frame_id = self.swap_chain.as_mut().unwrap()
             .acquire_image(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
     }
 
@@ -3582,7 +3664,7 @@ impl<B: hal::Backend> Device<B> {
             self.frame_fence[self.next_id].is_submitted = true;
 
             // present frame
-            self.swap_chain
+            self.swap_chain.as_mut().unwrap()
                 .present(
                     &mut self.queue_group.queues[0],
                     self.current_frame_id as _,
@@ -3644,7 +3726,7 @@ impl<B: hal::Backend> Device<B> {
         for framebuffer_depth in self.framebuffers_depth {
             self.device.destroy_framebuffer(framebuffer_depth);
         }
-        self.frame_depth.deinit(&self.device);
+        self.frame_depth.unwrap().deinit(&self.device);
         self.device.destroy_sampler(self.sampler_linear);
         self.device.destroy_sampler(self.sampler_nearest);
         for descriptor_pool in self.descriptor_pools {
@@ -3653,13 +3735,13 @@ impl<B: hal::Backend> Device<B> {
         for (_, program) in self.programs {
             program.deinit(&self.device)
         }
-        self.render_pass.deinit(&self.device);
+        self.render_pass.unwrap().deinit(&self.device);
         for fence in self.frame_fence {
             self.device.destroy_fence(fence.inner);
         }
         self.device.destroy_semaphore(self.image_available_semaphore);
         self.device.destroy_semaphore(self.render_finished_semaphore);
-        self.device.destroy_swapchain(self.swap_chain);
+        self.device.destroy_swapchain(self.swap_chain.unwrap());
     }
 }
 
