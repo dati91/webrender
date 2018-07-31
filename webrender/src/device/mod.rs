@@ -190,6 +190,7 @@ impl ExternalTexture {
     }
 }
 
+#[derive(Debug)]
 pub struct Texture {
     id: IdType,
     #[cfg_attr(not(feature = "gleam"), allow(dead_code))]

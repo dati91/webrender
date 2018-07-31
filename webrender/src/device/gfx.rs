@@ -49,7 +49,7 @@ pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
-pub const MAX_FRAME_COUNT: usize = 2;
+pub const MAX_FRAME_COUNT: usize = 3;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -137,6 +137,26 @@ pub enum DepthFunction {
 pub trait PrimitiveType {
     type Primitive: Clone + Copy;
     fn to_primitive_type(&self) -> Self::Primitive;
+}
+
+pub struct DataTexture {
+    textures: SmallVec<[Texture; 1]>,
+}
+
+impl DataTexture {
+    pub fn get(&self, index: usize) -> &Texture {
+        &self.textures[index]
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> &mut Texture {
+        &mut self.textures[index]
+    }
+
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
+        for texture in self.textures {
+            device.delete_texture(texture);
+        }
+    }
 }
 
 impl Texture {
@@ -1715,12 +1735,12 @@ pub struct Device<B: hal::Backend> {
 
     // Frame counter. This is used to map between CPU
     // frames and GPU frames.
-    frame_id: FrameId,
+    pub frame_id: FrameId,
 
     // Supported features
     features: hal::Features,
 
-    next_id: usize,
+    pub next_id: usize,
     frame_fence: SmallVec<[Fence<B>; 1]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
@@ -2295,6 +2315,15 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn bind_data_texture<S>(&mut self, sampler: S, data_texture: &DataTexture)
+        where
+            S: Into<TextureSlot>,
+    {
+        debug_assert!(self.inside_frame);
+        let texture = data_texture.get(self.next_id);
+        self.bind_texture_impl(sampler.into(), texture.id, texture.filter);
+    }
+
     pub fn bind_texture<S>(&mut self, sampler: S, texture: &Texture)
         where
             S: Into<TextureSlot>,
@@ -2446,6 +2475,25 @@ impl<B: hal::Backend> Device<B> {
         rbo_id
     }
 
+    pub fn create_data_texture(
+        &mut self,
+        target: TextureTarget,
+        format: ImageFormat,
+    ) -> DataTexture {
+        let mut textures = SmallVec::new();
+        for _ in 0..MAX_FRAME_COUNT {
+            textures.push(
+                self.create_texture(
+                    target,
+                    format
+                )
+            );
+        }
+        DataTexture {
+            textures
+        }
+    }
+
     pub fn create_texture(
         &mut self,
         target: TextureTarget,
@@ -2477,6 +2525,28 @@ impl<B: hal::Backend> Device<B> {
         unimplemented!();
     }
 
+    pub fn init_data_texture<T: Texel>(
+        &mut self,
+        data_texture: &mut DataTexture,
+        width: u32,
+        height: u32,
+        filter: TextureFilter,
+        render_target: Option<RenderTargetInfo>,
+        layer_count: i32,
+        pixels: Option<&[T]>,
+    ) {
+        for mut texture in &mut data_texture.textures {
+            self.init_texture(
+                &mut texture,
+                width,
+                height,
+                filter,
+                render_target,
+                layer_count,
+                pixels
+            );
+        }
+    }
     pub fn init_texture<T: Texel>(
         &mut self,
         texture: &mut Texture,
@@ -2970,6 +3040,21 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn delete_pbo(&mut self, _pbo: PBO) {
+    }
+
+    pub fn upload_data_texture<'a>(
+        &'a mut self,
+        data_texture: &'a DataTexture,
+        pbo: &PBO,
+        upload_count: usize,
+    ) -> TextureUploader<'a, B> {
+        debug_assert!(self.inside_frame);
+        let texture = data_texture.get(self.next_id);
+        self.upload_texture(
+            texture,
+            pbo,
+            upload_count,
+        )
     }
 
     pub fn upload_texture<'a>(

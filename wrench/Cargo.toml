@@ -18,7 +18,7 @@ gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gleam = { version = "0.6", optional = true }
 glutin = { version = "0.17", optional = true }
 app_units = "0.6"
-image = "0.19"
+image = "0.18"
 clap = { version = "2", features = ["yaml"] }
 lazy_static = "1"
 log = "0.4"

@@ -24,6 +24,7 @@ use device::desc;
 use device::{create_projection, DepthFunction, Device, ExternalTexture, FBOId, FileWatcherHandler, FrameId};
 use device::{PBO, PrimitiveType, ProgramCache, ShaderError, ReadPixelsFormat, RendererInit};
 use device::{Texture, TextureSampler, TextureFilter, UploadMethod, VertexArrayKind, VertexUsageHint, VAO};
+use device::DataTexture;
 #[cfg(feature = "gleam")]
 use device::{CustomVAO, Program, VBO};
 use euclid::{rect, Transform3D};
@@ -514,7 +515,9 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
     // Bind a source texture to the device.
     fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
         match *texture_id {
-            SourceTexture::Invalid => {}
+            SourceTexture::Invalid => {
+                device.bind_texture(sampler, &self.dummy_cache_texture);
+            }
             SourceTexture::CacheA8 => {
                 let texture = match self.cache_a8_texture {
                     Some(ref at) => &at.texture,
@@ -633,14 +636,14 @@ enum CacheBus {
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
 struct CacheTexture<B: hal::Backend> {
-    texture: Texture,
+    data_texture: DataTexture,
     bus: CacheBus,
     phantom_data: PhantomData<B>,
 }
 
 impl<B: hal::Backend> CacheTexture<B> {
     fn new(device: &mut Device<B>, _use_scatter: bool) -> Result<Self, RendererError> {
-        let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
+        let data_texture = device.create_data_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         #[cfg(feature = "gleam")]
         {
@@ -671,7 +674,7 @@ impl<B: hal::Backend> CacheTexture<B> {
                 }
             };
             Ok(CacheTexture {
-                texture,
+                data_texture,
                 bus,
                 phantom_data: PhantomData,
             })
@@ -686,7 +689,7 @@ impl<B: hal::Backend> CacheTexture<B> {
                 cpu_blocks: Vec::new(),
             };
             Ok(CacheTexture {
-                texture,
+                data_texture,
                 bus,
                 phantom_data: PhantomData,
             })
@@ -694,7 +697,8 @@ impl<B: hal::Backend> CacheTexture<B> {
     }
 
     fn deinit(self, device: &mut Device<B>) {
-        device.delete_texture(self.texture);
+        //device.delete_texture(self.texture);
+        self.data_texture.deinit(device);
         match self.bus {
             CacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
@@ -710,7 +714,7 @@ impl<B: hal::Backend> CacheTexture<B> {
     }
 
     fn get_height(&self) -> u32 {
-        self.texture.get_dimensions().height
+        self.data_texture.get(0).get_dimensions().height
     }
 
     fn prepare_for_updates(
@@ -720,7 +724,7 @@ impl<B: hal::Backend> CacheTexture<B> {
         max_height: u32,
     ) {
         // See if we need to create or resize the texture.
-        let old_size = self.texture.get_dimensions();
+        let old_size = self.data_texture.get(0).get_dimensions();
         let new_size = DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, max_height);
 
         match self.bus {
@@ -728,8 +732,8 @@ impl<B: hal::Backend> CacheTexture<B> {
                 if max_height > old_size.height {
                     // Create a f32 texture that can be used for the vertex shader
                     // to fetch data from.
-                    device.init_texture::<u8>(
-                        &mut self.texture,
+                    device.init_data_texture::<u8>(
+                        &mut self.data_texture,
                         new_size.width,
                         new_size.height,
                         TextureFilter::Nearest,
@@ -763,8 +767,8 @@ impl<B: hal::Backend> CacheTexture<B> {
                     if old_size.height > 0 {
                         device.resize_renderable_texture(&mut self.texture, new_size);
                     } else {
-                        device.init_texture::<u8>(
-                            &mut self.texture,
+                        device.init_data_texture::<u8>(
+                            &mut self.data_texture,
                             new_size.width,
                             new_size.height,
                             TextureFilter::Nearest,
@@ -863,8 +867,8 @@ impl<B: hal::Backend> CacheTexture<B> {
                     return 0
                 }
 
-                let mut uploader = device.upload_texture(
-                    &self.texture,
+                let mut uploader = device.upload_data_texture(
+                    &self.data_texture,
                     buffer,
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
                 );
@@ -884,7 +888,7 @@ impl<B: hal::Backend> CacheTexture<B> {
 
                     uploader.upload(rect, 0, None, cpu_blocks);
 
-                    row.is_dirty = false;
+                    //row.is_dirty = false;
                 }
 
                 rows_dirty
@@ -907,7 +911,7 @@ impl<B: hal::Backend> CacheTexture<B> {
 }
 
 struct VertexDataTexture<B: hal::Backend> {
-    texture: Texture,
+    data_texture: DataTexture,
     pbo: PBO,
     phantom_data: PhantomData<B>,
 }
@@ -917,14 +921,14 @@ impl<B: hal::Backend> VertexDataTexture<B> {
         device: &mut Device<B>,
         format: ImageFormat,
     ) -> VertexDataTexture<B> {
-        let texture = device.create_texture(
+        let data_texture = device.create_data_texture(
             TextureTarget::Default,
             format,
         );
         let pbo = device.create_pbo();
 
         VertexDataTexture {
-            texture,
+            data_texture,
             pbo,
             phantom_data: PhantomData
         }
@@ -953,13 +957,13 @@ impl<B: hal::Backend> VertexDataTexture<B> {
         let needed_height = (data.len() / items_per_row) as u32;
 
         // Determine if the texture needs to be resized.
-        let texture_size = self.texture.get_dimensions();
+        let texture_size = self.data_texture.get(0).get_dimensions();
 
         if needed_height > texture_size.height {
             let new_height = (needed_height + 127) & !127;
 
-            device.init_texture::<u8>(
-                &mut self.texture,
+            device.init_data_texture::<u8>(
+                &mut self.data_texture,
                 width,
                 new_height,
                 TextureFilter::Nearest,
@@ -974,13 +978,14 @@ impl<B: hal::Backend> VertexDataTexture<B> {
             DeviceUintSize::new(width, needed_height),
         );
         device
-            .upload_texture(&self.texture, &self.pbo, 0)
+            .upload_data_texture(&self.data_texture, &self.pbo, 0)
             .upload(rect, 0, None, data);
     }
 
     fn deinit(self, device: &mut Device<B>) {
         device.delete_pbo(self.pbo);
-        device.delete_texture(self.texture);
+        //device.delete_texture(self.texture);
+        self.data_texture.deinit(device);
     }
 }
 
@@ -2242,9 +2247,9 @@ impl<B: hal::Backend> Renderer<B>
 
         // Note: the texture might have changed during the `update`,
         // so we need to bind it here.
-        self.device.bind_texture(
+        self.device.bind_data_texture(
             TextureSampler::ResourceCache,
-            &self.gpu_cache_texture.texture,
+            &self.gpu_cache_texture.data_texture,
         );
     }
 
@@ -2293,6 +2298,9 @@ impl<B: hal::Backend> Renderer<B>
                         offset,
                     } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
+                        //println!("update_texture_cache::update texture={:?}", texture);
+                        //println!("rect={:?} stride={:?} layer_index={:?} offset={:?}", rect, stride, layer_index, offset);
+                        //println!("frame_id={:?} next_id={:?}", self.device.frame_id, self.device.next_id);
                         let mut uploader = self.device.upload_texture(
                             texture,
                             &self.texture_cache_upload_pbo,
@@ -3311,34 +3319,34 @@ impl<B: hal::Backend> Renderer<B>
             &mut self.device,
             &mut frame.prim_headers.headers_float,
         );
-        self.device.bind_texture(
+        self.device.bind_data_texture(
             TextureSampler::PrimitiveHeadersF,
-            &self.prim_header_f_texture.texture,
+            &self.prim_header_f_texture.data_texture,
         );
 
         self.prim_header_i_texture.update(
             &mut self.device,
             &mut frame.prim_headers.headers_int,
         );
-        self.device.bind_texture(
+        self.device.bind_data_texture(
             TextureSampler::PrimitiveHeadersI,
-            &self.prim_header_i_texture.texture,
+            &self.prim_header_i_texture.data_texture,
         );
 
         self.transforms_texture.update(
             &mut self.device,
             &mut frame.transform_palette,
         );
-        self.device.bind_texture(
+        self.device.bind_data_texture(
             TextureSampler::TransformPalette,
-            &self.transforms_texture.texture,
+            &self.transforms_texture.data_texture,
         );
 
         self.render_task_texture
             .update(&mut self.device, &mut frame.render_tasks.task_data);
-        self.device.bind_texture(
+        self.device.bind_data_texture(
             TextureSampler::RenderTasks,
-            &self.render_task_texture.texture,
+            &self.render_task_texture.data_texture,
         );
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
@@ -3699,10 +3707,11 @@ impl<B: hal::Backend> Renderer<B>
     }
 
     pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
-        let size = self.gpu_cache_texture.texture.get_dimensions();
+        // TODO
+        let size = self.gpu_cache_texture.data_texture.get(0).get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
         self.device.begin_frame();
-        self.device.bind_read_target(Some((&self.gpu_cache_texture.texture, 0)));
+        self.device.bind_read_target(Some((&self.gpu_cache_texture.data_texture.get(0), 0)));
         self.device.read_pixels_into(
             DeviceUintRect::new(DeviceUintPoint::zero(), size),
             ReadPixelsFormat::Standard(ImageFormat::RGBAF32),
@@ -4185,7 +4194,7 @@ impl<B: hal::Backend> Renderer<B>
             self.update_gpu_cache(); // flush pending updates
             let mut plain_self = PlainRenderer {
                 gpu_cache: Self::save_texture(
-                    &self.gpu_cache_texture.texture,
+                    &self.gpu_cache_texture.data_texture.get(0),
                     "gpu", &config.root, &mut self.device,
                 ),
                 gpu_cache_frame_id: self.gpu_cache_frame_id,
@@ -4260,14 +4269,14 @@ impl<B: hal::Backend> Renderer<B>
 
             info!("loading gpu cache");
             let gpu_cache_data = Self::load_texture(
-                &mut self.gpu_cache_texture.texture,
+                &mut self.gpu_cache_texture.data_texture.get_mut(0),
                 &renderer.gpu_cache,
                 &root,
                 &mut self.device,
             );
             match self.gpu_cache_texture.bus {
                 CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
-                    let dim = self.gpu_cache_texture.texture.get_dimensions();
+                    let dim = self.gpu_cache_texture.data_texture.get(0).get_dimensions();
                     let blocks = unsafe {
                         slice::from_raw_parts(
                             gpu_cache_data.as_ptr() as *const GpuBlockData,

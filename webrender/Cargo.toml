@@ -27,7 +27,7 @@ cfg-if = "0.1.2"
 euclid = "0.18"
 fxhash = "0.2.1"
 gleam = { optional = true, version = "0.6" }
-image = { optional = true, version = "0.19" }
+image = { optional = true, version = "0.18" }
 lazy_static = "1"
 log = "0.4"
 num-traits = "0.1.43"
