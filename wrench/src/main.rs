@@ -405,7 +405,7 @@ fn make_window(
             let window = winit::WindowBuilder::new()
                 .with_title("WRech")
                 .with_multitouch()
-                .with_dimensions(lsize)
+                .with_min_dimensions(lsize)
                 .build(events_loop).unwrap();
             //assert_eq!(window.get_inner_size().unwrap(), lsize);
             return WindowWrapper::Window(window);

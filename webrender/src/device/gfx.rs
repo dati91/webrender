@@ -985,6 +985,7 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
+        backend_features: &hal::Features,
     ) -> Program<B> {
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
@@ -1019,24 +1020,29 @@ impl<B: hal::Backend> Program<B> {
                 ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
                 ShaderKind::Cache(VertexArrayKind::Border) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
                 ShaderKind::ClipCache => vec![(BlendState::MULTIPLY, DepthTest::Off)],
-                ShaderKind::Text => vec![
-                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
-                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
-                    (SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
-                    (SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
-                    (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
-                    (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
-                    (SUBPIXEL_PASS0, DepthTest::Off),
-                    (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
-                    (SUBPIXEL_PASS1, DepthTest::Off),
-                    (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
-                    (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
-                ],
+                ShaderKind::Text => {
+                    let mut states = vec![
+                        (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                        (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                        (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
+                        (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
+                        (SUBPIXEL_PASS0, DepthTest::Off),
+                        (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
+                        (SUBPIXEL_PASS1, DepthTest::Off),
+                        (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
+                        (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
+                    ];
+                    if backend_features.contains(hal::Features::DUAL_SRC_BLENDING) {
+                        states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
+                        states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
+                    }
+                    states
+                },
                 #[cfg(feature = "debug_renderer")]
                 ShaderKind::DebugColor | ShaderKind::DebugFont => vec![
                     (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
@@ -1751,7 +1757,7 @@ impl<B: hal::Backend> Device<B> {
         let limits = adapter
             .physical_device
             .limits();
-        let max_texture_size = 4096u32; // TODO use limits after it points to the correct texture size
+        let max_texture_size = 4400u32; // TODO use limits after it points to the correct texture size
 
         let upload_memory_type: hal::MemoryTypeId = memory_types
             .iter()
@@ -2256,6 +2262,7 @@ impl<B: hal::Backend> Device<B> {
             &name,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
+            &self.features,
         );
 
         let id = self.generate_program_id();

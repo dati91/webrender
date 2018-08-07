@@ -586,26 +586,12 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashM
         }
         file_name.push_str(".spv");
         let spirv_file_path = Path::new(&out_dir).join(&file_name);
-        #[cfg(any(target_os = "android", target_os = "linux"))]
-        let mut glslang_validator =
-            String::from_utf8(Command::new("find")
-                .arg("../")
-                .arg("-name")
-                .arg("glslang_validator")
-                .arg("-print")
-                .arg("-quit")
-                .output().unwrap().stdout).unwrap();
-        #[cfg(any(target_os = "android", target_os = "linux"))]
-            glslang_validator.pop(); // remove \n
-        #[cfg(any(target_os = "android", target_os = "linux"))]
-        let mut glslang_cmd = if glslang_validator.is_empty() {
-            // Use the glslangValidator binary from tools, if glslang_validator is not found.
-            Command::new(Path::new("./tools/glslangValidator"))
-        } else {
-            Command::new(Path::new(&glslang_validator))
-        };
+        #[cfg(target_os="linux")]
+        let mut glslang_cmd = Command::new(Path::new("./tools/glslang-validator-linux"));
+        #[cfg(target_os="macos")]
+        let mut glslang_cmd = Command::new(Path::new("./tools/glslang-validator-mac"));
         #[cfg(target_os = "windows")]
-        let mut glslang_cmd = Command::new(Path::new("./tools/glslangValidator.exe"));
+        let mut glslang_cmd = Command::new(Path::new("./tools/glslang-validator-win.exe"));
         glslang_cmd
             .arg("-V")
             .arg("-o")
@@ -622,10 +608,12 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashM
                 println!("Error while compiling spirv: {:?}", file_name);
                 process::exit(1)
             };
-        #[cfg(any(target_os = "android", target_os = "linux"))]
-        let mut spirv_val_cmd = Command::new(Path::new("./tools/spirv-val"));
+        #[cfg(target_os="linux")]
+        let mut spirv_val_cmd = Command::new(Path::new("./tools/spirv-val-linux"));
+        #[cfg(target_os="macos")]
+        let mut spirv_val_cmd = Command::new(Path::new("./tools/spirv-val-mac"));
         #[cfg(target_os = "windows")]
-        let mut spirv_val_cmd = Command::new(Path::new("./tools/spirv-val.exe"));
+        let mut spirv_val_cmd = Command::new(Path::new("./tools/spirv-val-win.exe"));
         spirv_val_cmd.arg(&spirv_file_path);
         if spirv_val_cmd
             .stdout(Stdio::inherit())
