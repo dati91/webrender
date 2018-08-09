@@ -382,33 +382,6 @@ const LESS_EQUAL_WRITE: DepthTest = DepthTest::On {
     write: true,
 };
 
-pub struct ImageBuffer<B: hal::Backend> {
-    pub buffer: CopyBuffer<B>,
-    pub offset: u64,
-}
-
-impl<B: hal::Backend> ImageBuffer<B> {
-    fn new(buffer: CopyBuffer<B>) -> ImageBuffer<B> {
-        ImageBuffer {
-            buffer,
-            offset: 0,
-        }
-    }
-
-    pub fn update(&mut self, device: &B::Device, data: &[u8], offset_alignment: usize) -> usize {
-        self.buffer
-            .update(device, self.offset, data.len() as u64, data, offset_alignment)
-    }
-
-    pub fn reset(&mut self) {
-        self.offset = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        self.buffer.deinit(device);
-    }
-}
-
 pub struct ImageCore<B: hal::Backend> {
     pub image: B::Image,
     pub memory: Option<B::Memory>,
@@ -509,7 +482,6 @@ impl<B: hal::Backend> ImageCore<B> {
 
 pub struct Image<B: hal::Backend> {
     pub core: ImageCore<B>,
-    pub upload_buffer: ImageBuffer<B>,
     pub kind: hal::image::Kind,
     pub format: ImageFormat,
 }
@@ -524,7 +496,6 @@ impl<B: hal::Backend> Image<B> {
         image_depth: i32,
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
-        pitch_alignment: usize,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -533,16 +504,6 @@ impl<B: hal::Backend> Image<B> {
             ImageFormat::RGBAF32 => hal::format::Format::Rgba32Float,
             ImageFormat::RGBAI32 => hal::format::Format::Rgba32Int,
         };
-        let upload_buffer = CopyBuffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::TRANSFER_SRC,
-            1, // Data stride is 1, because we receive image data as [u8].
-            (image_width * image_format.bytes_per_pixel()) as usize,
-            image_height as usize,
-            pitch_alignment,
-        );
-
         let kind = hal::image::Kind::D2(
             image_width as _,
             image_height as _,
@@ -566,7 +527,6 @@ impl<B: hal::Backend> Image<B> {
 
         Image {
             core,
-            upload_buffer: ImageBuffer::new(upload_buffer),
             kind,
             format: image_format,
         }
@@ -576,16 +536,15 @@ impl<B: hal::Backend> Image<B> {
         &mut self,
         device: &mut B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        staging_buffer_pool: &mut StagingBufferPool<B>,
         rect: DeviceUintRect,
         layer_index: i32,
         image_data: &[u8],
-        offset_alignment: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary>
     {
-        //let (image_width, image_height, _, _) = self.kind.dimensions();
         let pos = rect.origin;
         let size = rect.size;
-        let offset = self.upload_buffer.update(device, image_data, offset_alignment);
+        let buffer = staging_buffer_pool.add(device, image_data);
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         let range = hal::image::SubresourceRange {
@@ -593,31 +552,30 @@ impl<B: hal::Backend> Image<B> {
             levels: 0 .. 1,
             layers: layer_index as _ .. (layer_index + 1) as _,
         };
-        if let Some(barrier) = self.core.transit(
-            hal::image::Access::TRANSFER_WRITE,
-            hal::image::Layout::TransferDstOptimal,
-            range.clone(),
-        ) {
+        let mut barriers = Vec::new();
+        barriers.extend(buffer.transit(hal::buffer::Access::TRANSFER_READ));
+        barriers.extend(
+            self.core.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+                range.clone(),
+            )
+        );
+        if !barriers.is_empty() {
             cmd_buffer.pipeline_barrier(
                 PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
-                &[barrier],
+                &barriers,
             );
         }
-
-        let buffer_width = if self.kind.extent().width == size.width {
-            self.upload_buffer.buffer.row_pitch() as u32 / self.format.bytes_per_pixel()
-        } else {
-            size.width
-        };
         cmd_buffer.copy_buffer_to_image(
-            &self.upload_buffer.buffer.buffer,
+            &buffer.buffer,
             &self.core.image,
             hal::image::Layout::TransferDstOptimal,
             &[
                 hal::command::BufferImageCopy {
-                    buffer_offset: self.upload_buffer.offset,
-                    buffer_width,
+                    buffer_offset: 0,
+                    buffer_width: size.width,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
@@ -650,13 +608,11 @@ impl<B: hal::Backend> Image<B> {
             );
         }
 
-        self.upload_buffer.offset += offset as u64;
         cmd_buffer.finish()
     }
 
     pub fn deinit(self, device: &B::Device) {
         self.core.deinit(device);
-        self.upload_buffer.deinit(device);
     }
 }
 
@@ -748,31 +704,23 @@ impl<B: hal::Backend> Buffer<B> {
     }
 }
 
-pub struct CopyBuffer<B: hal::Backend> {
+pub struct StagingBuffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
-    pub data_stride: usize,
-    pub data_width: usize,
-    pub data_height: usize,
-    pub row_pitch_in_bytes: usize,
+    pub buffer_size: usize,
     state: Cell<hal::buffer::State>,
 }
 
-impl<B: hal::Backend> CopyBuffer<B> {
-    pub fn create(
+impl<B: hal::Backend> StagingBuffer<B> {
+    pub fn create<T: Copy>(
         device: &B::Device,
         memory_types: &[hal::MemoryType],
         usage: hal::buffer::Usage,
-        data_stride: usize,
-        data_width: usize, // without stride
-        data_height: usize,
         pitch_alignment: usize,
+        image_data: &[T],
     ) -> Self {
-        let mut row_pitch_in_bytes = (data_width * data_stride + pitch_alignment) & !pitch_alignment;
-        if row_pitch_in_bytes % data_width > 0 {
-            row_pitch_in_bytes = ((data_width + pitch_alignment) & !pitch_alignment) * data_stride;
-        }
-        let buffer_size = row_pitch_in_bytes * data_height;
+        let buffer_size= (image_data.len() + pitch_alignment) & !pitch_alignment;
+        assert_eq!(buffer_size % image_data.len(), 0);
         let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
         let requirements = device.get_buffer_requirements(&unbound_buffer);
         let mem_type = memory_types
@@ -781,7 +729,6 @@ impl<B: hal::Backend> CopyBuffer<B> {
             .position(|(id, mt)| {
                 requirements.type_mask & (1 << id) != 0 &&
                     mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
-                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
             })
             .unwrap()
             .into();
@@ -791,58 +738,22 @@ impl<B: hal::Backend> CopyBuffer<B> {
         let buffer = device
             .bind_buffer_memory(&memory, 0, unbound_buffer)
             .unwrap();
-        CopyBuffer {
+        {
+            let mut data = device
+                .acquire_mapping_writer::<T>(
+                    &memory,
+                    0..buffer_size as u64,
+                )
+                .unwrap();
+            data[0..image_data.len()].copy_from_slice(&image_data);
+            device.release_mapping_writer(data);
+        }
+        StagingBuffer {
             memory,
             buffer,
-            data_stride,
-            data_width,
-            data_height,
-            row_pitch_in_bytes,
-            state: Cell::new(hal::buffer::Access::empty())
+            buffer_size,
+            state: Cell::new(hal::buffer::Access::empty()),
         }
-    }
-
-    pub fn update<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        buffer_offset: u64,
-        image_data_width_in_bytes: u64,
-        image_data: &[T],
-        offset_alignment: usize,
-    ) -> usize {
-        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
-        let buffer_data_width_in_bytes = self.data_width * self.data_stride;
-        let mut needed_height = image_data_width_in_bytes / buffer_data_width_in_bytes as u64;
-        let last_row_length = image_data_width_in_bytes % buffer_data_width_in_bytes as u64;
-        let range = if last_row_length != 0 {
-            needed_height += 1;
-            buffer_offset ..
-                buffer_offset + ((needed_height - 1) as usize * self.row_pitch_in_bytes) as u64 + last_row_length
-        } else {
-            buffer_offset .. (buffer_offset + (needed_height as usize * self.row_pitch_in_bytes) as u64)
-        };
-
-        let mut data = device
-            .acquire_mapping_writer::<T>(
-                &self.memory,
-                range,
-            )
-            .unwrap();
-
-        for y in 0 .. needed_height as usize {
-            let lower_bound = y * self.data_width;
-            let upper_bound = cmp::min(lower_bound + self.data_width, image_data.len());
-            let row = &(*image_data)[lower_bound .. upper_bound];
-            let dest_base = y * self.row_pitch();
-            data[dest_base .. dest_base + row.len()].copy_from_slice(row);
-        }
-        device.release_mapping_writer(data);
-        (needed_height as usize * self.row_pitch() + offset_alignment) & !offset_alignment
-    }
-
-    fn row_pitch(&self) -> usize {
-        assert_eq!(self.row_pitch_in_bytes % self.data_stride, 0);
-        self.row_pitch_in_bytes / self.data_stride
     }
 
     fn transit(
@@ -864,6 +775,44 @@ impl<B: hal::Backend> CopyBuffer<B> {
     pub fn deinit(self, device: &B::Device) {
         device.destroy_buffer(self.buffer);
         device.free_memory(self.memory);
+    }
+}
+
+pub struct StagingBufferPool<B: hal::Backend> {
+    buffers: Vec<StagingBuffer<B>>,
+    memory_types: Vec<hal::MemoryType>,
+    pitch_alignment: usize,
+}
+
+impl<B: hal::Backend> StagingBufferPool<B> {
+    fn new(
+        memory_types: &[hal::MemoryType],
+        pitch_alignment: usize,
+    ) -> Self {
+        StagingBufferPool {
+            buffers: vec!(),
+            memory_types: memory_types.clone().to_vec(),
+            pitch_alignment,
+        }
+    }
+
+    fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) -> &StagingBuffer<B> {
+        self.buffers.push(
+            StagingBuffer::create(
+                device,
+                &self.memory_types,
+                hal::buffer::Usage::TRANSFER_SRC,
+                self.pitch_alignment,
+                data,
+            )
+        );
+        self.buffers.last().unwrap()
+    }
+
+    fn reset(&mut self, device: &B::Device) {
+        for buffer in self.buffers.drain(..) {
+            buffer.deinit(device)
+        }
     }
 }
 
@@ -1672,6 +1621,7 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
+    pub staging_buffer_pool: SmallVec<[StagingBufferPool<B>; 1]>,
     pub swap_chain: B::Swapchain,
     pub render_pass: RenderPass<B>,
     pub framebuffers: Vec<B::Framebuffer>,
@@ -1978,6 +1928,7 @@ impl<B: hal::Backend> Device<B> {
         let mut descriptor_pools = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
+        let mut staging_buffer_pool = SmallVec::new();
         for _ in 0..MAX_FRAME_COUNT {
             descriptor_pools.push(
                 DescriptorPools::new(
@@ -2005,6 +1956,12 @@ impl<B: hal::Backend> Device<B> {
             command_pool.push(
                 cp
             );
+            staging_buffer_pool.push(
+                StagingBufferPool::new(
+                    &memory_types,
+                    (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                )
+            );
         }
 
         let image_available_semaphore = device.create_semaphore();
@@ -2024,6 +1981,7 @@ impl<B: hal::Backend> Device<B> {
             depth_format,
             queue_group,
             command_pool,
+            staging_buffer_pool,
             swap_chain,
             render_pass,
             framebuffers,
@@ -2101,12 +2059,6 @@ impl<B: hal::Backend> Device<B> {
         self.bound_sampler = [TextureFilter::Linear; 16];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
-    }
-
-    fn reset_image_buffer_offsets(&mut self) {
-        for img in self.images.values_mut() {
-            img.upload_buffer.reset();
-        }
     }
 
     fn reset_program_buffer_offsets(&mut self) {
@@ -2533,7 +2485,6 @@ impl<B: hal::Backend> Device<B> {
             texture.layer_count,
             view_kind,
             mip_levels,
-            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         assert_eq!(texture.fbo_ids.len(), 0);
@@ -2611,13 +2562,13 @@ impl<B: hal::Backend> Device<B> {
                         .update(
                             &mut self.device,
                             &mut self.command_pool[self.next_id],
+                            &mut self.staging_buffer_pool[self.next_id],
                             DeviceUintRect::new(
                                 DeviceUintPoint::new(0, 0),
                                 DeviceUintSize::new(texture.width, texture.height),
                             ),
                             0,
                             texels_to_u8_slice(data),
-                            (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                         )
                 );
             if texture.filter == TextureFilter::Trilinear {
@@ -3033,14 +2984,12 @@ impl<B: hal::Backend> Device<B> {
         } else {
             (&self.frame_images[self.current_frame_id], 0)
         };
-        let download_buffer: CopyBuffer<B> = CopyBuffer::create(
+        let download_buffer: StagingBuffer<B> = StagingBuffer::create(
             &self.device,
             &self.memory_types,
             hal::buffer::Usage::TRANSFER_DST,
-            1,
-            (rect.size.width * bytes_per_pixel) as usize,
-            rect.size.height as usize,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+            &output,
         );
 
         let mut command_pool = self.device.create_command_pool_typed(
@@ -3597,13 +3546,13 @@ impl<B: hal::Backend> Device<B> {
         }
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
         self.reset_state();
-        self.reset_image_buffer_offsets();
         if self.frame_fence[self.next_id].is_submitted {
             self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0);
             self.device.reset_fence(&self.frame_fence[self.next_id].inner);
             self.frame_fence[self.next_id].is_submitted = false;
         }
         self.command_pool[self.next_id].reset();
+        self.staging_buffer_pool[self.next_id].reset(&self.device);
         self.descriptor_pools[self.next_id].reset();
         self.reset_program_buffer_offsets();
     }
@@ -3633,6 +3582,9 @@ impl<B: hal::Backend> Device<B> {
         for command_pool in self.command_pool {
             self.device.destroy_command_pool(command_pool.into_raw());
         }
+        /*for staging_buffer_pool in self.staging_buffer_pool {
+            staging_buffer_pool.reset(&self.device);
+        }*/
         for image in self.frame_images {
             image.deinit(&self.device);
         }
@@ -3720,10 +3672,10 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
                     .update(
                         &mut self.device.device,
                         &mut self.device.command_pool[self.device.next_id],
+                        &mut self.device.staging_buffer_pool[self.device.next_id],
                         rect,
                         layer_index,
                         data,
-                        (self.device.limits.min_buffer_copy_offset_alignment - 1) as usize,
                     )
             );
 
