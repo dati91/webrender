@@ -16,7 +16,6 @@ use smallvec::SmallVec;
 use std::cell::Cell;
 #[cfg(feature = "debug_renderer")]
 use std::convert::Into;
-use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
 use std::mem;
@@ -44,7 +43,9 @@ use hal::queue::Submission;
 
 pub type TextureId = u32;
 
-pub const MAX_INSTANCE_COUNT: usize = 1024;
+pub const MAX_INDEX_COUNT: usize = 4096;
+pub const MAX_INSTANCE_COUNT: usize = 8192;
+pub const TEXTURE_CACHE_SIZE: usize = 128 << 20; // 128MB
 pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
@@ -63,15 +64,6 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 };
 
 const ENTRY_NAME: &str = "main";
-
-cfg_if! {
-    if #[cfg(feature = "debug_renderer")]{
-        const MAX_DEBUG_COLOR_INDEX_COUNT: usize = 14544;
-        const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
-        const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
-        const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
-    }
-}
 
 pub struct DeviceInit<'a, B: hal::Backend> {
     pub adapter: &'a hal::Adapter<B>,
@@ -241,16 +233,6 @@ impl ShaderKind {
             _ => false,
         }
     }
-
-    fn max_possible_index_buffer_len(&self) -> usize {
-        match *self {
-            #[cfg(feature = "debug_renderer")]
-            ShaderKind::DebugColor => MAX_DEBUG_COLOR_INDEX_COUNT * mem::size_of::<u32>(),
-            #[cfg(feature = "debug_renderer")]
-            ShaderKind::DebugFont => MAX_DEBUG_FONT_INDEX_COUNT * mem::size_of::<u32>(),
-            _ => 0,
-        }
-    }
 }
 
 pub struct ProgramCache;
@@ -382,33 +364,6 @@ const LESS_EQUAL_WRITE: DepthTest = DepthTest::On {
     write: true,
 };
 
-pub struct ImageBuffer<B: hal::Backend> {
-    pub buffer: CopyBuffer<B>,
-    pub offset: u64,
-}
-
-impl<B: hal::Backend> ImageBuffer<B> {
-    fn new(buffer: CopyBuffer<B>) -> ImageBuffer<B> {
-        ImageBuffer {
-            buffer,
-            offset: 0,
-        }
-    }
-
-    pub fn update(&mut self, device: &B::Device, data: &[u8], offset_alignment: usize) -> usize {
-        self.buffer
-            .update(device, self.offset, data.len() as u64, data, offset_alignment)
-    }
-
-    pub fn reset(&mut self) {
-        self.offset = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        self.buffer.deinit(device);
-    }
-}
-
 pub struct ImageCore<B: hal::Backend> {
     pub image: B::Image,
     pub memory: Option<B::Memory>,
@@ -509,7 +464,6 @@ impl<B: hal::Backend> ImageCore<B> {
 
 pub struct Image<B: hal::Backend> {
     pub core: ImageCore<B>,
-    pub upload_buffer: ImageBuffer<B>,
     pub kind: hal::image::Kind,
     pub format: ImageFormat,
 }
@@ -524,7 +478,6 @@ impl<B: hal::Backend> Image<B> {
         image_depth: i32,
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
-        pitch_alignment: usize,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -533,17 +486,6 @@ impl<B: hal::Backend> Image<B> {
             ImageFormat::RGBAF32 => hal::format::Format::Rgba32Float,
             ImageFormat::RGBAI32 => hal::format::Format::Rgba32Int,
         };
-        let upload_buffer = CopyBuffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::TRANSFER_SRC,
-            1, // Data stride is 1, because we receive image data as [u8].
-            (image_width * image_format.bytes_per_pixel()) as usize,
-            image_height as usize,
-            image_depth as _,
-            pitch_alignment,
-        );
-
         let kind = hal::image::Kind::D2(
             image_width as _,
             image_height as _,
@@ -567,7 +509,6 @@ impl<B: hal::Backend> Image<B> {
 
         Image {
             core,
-            upload_buffer: ImageBuffer::new(upload_buffer),
             kind,
             format: image_format,
         }
@@ -577,16 +518,16 @@ impl<B: hal::Backend> Image<B> {
         &mut self,
         device: &mut B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        staging_buffer_pool: &mut BufferPool<B>,
         rect: DeviceUintRect,
         layer_index: i32,
         image_data: &[u8],
-        offset_alignment: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary>
     {
-        //let (image_width, image_height, _, _) = self.kind.dimensions();
         let pos = rect.origin;
         let size = rect.size;
-        let offset = self.upload_buffer.update(device, image_data, offset_alignment);
+        staging_buffer_pool.add(device, image_data);
+        let buffer = staging_buffer_pool.buffer();
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         let range = hal::image::SubresourceRange {
@@ -594,31 +535,30 @@ impl<B: hal::Backend> Image<B> {
             levels: 0 .. 1,
             layers: layer_index as _ .. (layer_index + 1) as _,
         };
-        if let Some(barrier) = self.core.transit(
-            hal::image::Access::TRANSFER_WRITE,
-            hal::image::Layout::TransferDstOptimal,
-            range.clone(),
-        ) {
+        let mut barriers = Vec::new();
+        barriers.extend(buffer.transit(hal::buffer::Access::TRANSFER_READ));
+        barriers.extend(
+            self.core.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+                range.clone(),
+            )
+        );
+        if !barriers.is_empty() {
             cmd_buffer.pipeline_barrier(
                 PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
-                &[barrier],
+                &barriers,
             );
         }
-
-        let buffer_width = if self.kind.extent().width == size.width {
-            self.upload_buffer.buffer.row_pitch() as u32 / self.format.bytes_per_pixel()
-        } else {
-            size.width
-        };
         cmd_buffer.copy_buffer_to_image(
-            &self.upload_buffer.buffer.buffer,
+            &buffer.buffer,
             &self.core.image,
             hal::image::Layout::TransferDstOptimal,
             &[
                 hal::command::BufferImageCopy {
-                    buffer_offset: self.upload_buffer.offset,
-                    buffer_width,
+                    buffer_offset: (staging_buffer_pool.offset - staging_buffer_pool.size) as _,
+                    buffer_width: size.width,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
@@ -651,201 +591,83 @@ impl<B: hal::Backend> Image<B> {
             );
         }
 
-        self.upload_buffer.offset += offset as u64;
         cmd_buffer.finish()
     }
 
     pub fn deinit(self, device: &B::Device) {
         self.core.deinit(device);
-        self.upload_buffer.deinit(device);
     }
 }
 
 pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
-    pub data_stride: usize,
-    pub data_len: usize,
-    _state: Cell<hal::buffer::State>,
-}
-
-impl<B: hal::Backend> Buffer<B> {
-    pub fn create(
-        device: &B::Device,
-        memory_types: &[hal::MemoryType],
-        usage: hal::buffer::Usage,
-        data_stride: usize,
-        data_len: usize,
-    ) -> Self {
-        let buffer_size = data_stride * data_len;
-        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
-        let requirements = device.get_buffer_requirements(&unbound_buffer);
-        let mem_type = memory_types
-            .iter()
-            .enumerate()
-            .position(|(id, mt)| {
-                requirements.type_mask & (1 << id) != 0 &&
-                    mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
-                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
-            })
-            .unwrap()
-            .into();
-        let memory = device
-            .allocate_memory(mem_type, requirements.size)
-            .unwrap();
-        let buffer = device
-            .bind_buffer_memory(&memory, 0, unbound_buffer)
-            .unwrap();
-        Buffer {
-            memory,
-            buffer,
-            data_stride,
-            data_len,
-            _state: Cell::new(hal::buffer::Access::empty())
-        }
-    }
-
-    pub fn update<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        buffer_offset: u64,
-        buffer_width: u64,
-        update_data: &[T],
-    ) {
-        //TODO:
-        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
-        let mut data = device
-            .acquire_mapping_writer::<T>(
-                &self.memory,
-                buffer_offset .. (buffer_offset + buffer_width),
-            )
-            .unwrap();
-        assert_eq!(data.len(), update_data.len());
-        for (i, d) in update_data.iter().enumerate() {
-            data[i] = *d;
-        }
-        device.release_mapping_writer(data);
-    }
-
-    fn _transit(
-        &self,
-        access: hal::buffer::Access,
-    ) -> Option<hal::memory::Barrier<B>> {
-        let src_state = self._state.get();
-        if src_state == access {
-            None
-        } else {
-            self._state.set(access);
-            Some(hal::memory::Barrier::Buffer {
-                states: src_state .. access,
-                target: &self.buffer,
-            })
-        }
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        device.destroy_buffer(self.buffer);
-        device.free_memory(self.memory);
-    }
-}
-
-pub struct CopyBuffer<B: hal::Backend> {
-    pub memory: B::Memory,
-    pub buffer: B::Buffer,
-    pub data_stride: usize,
-    pub data_width: usize,
-    pub data_height: usize,
-    pub row_pitch_in_bytes: usize,
+    pub buffer_size: usize,
+    pub buffer_len: usize,
+    pub stride: usize,
     state: Cell<hal::buffer::State>,
 }
 
-impl<B: hal::Backend> CopyBuffer<B> {
-    pub fn create(
+impl<B: hal::Backend> Buffer<B> {
+    pub fn new(
         device: &B::Device,
         memory_types: &[hal::MemoryType],
         usage: hal::buffer::Usage,
-        data_stride: usize,
-        data_width: usize, // without stride
-        data_height: usize,
-        layers: usize,
         pitch_alignment: usize,
+        data_len: usize,
+        stride: usize,
     ) -> Self {
-        let mut row_pitch_in_bytes = (data_width * data_stride + pitch_alignment) & !pitch_alignment;
-        if row_pitch_in_bytes % data_width > 0 {
-            row_pitch_in_bytes = ((data_width + pitch_alignment) & !pitch_alignment) * data_stride;
-        }
-        let buffer_size = row_pitch_in_bytes * data_height * layers;
+        let buffer_size = (data_len * stride + pitch_alignment) & !pitch_alignment;
         let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
         let requirements = device.get_buffer_requirements(&unbound_buffer);
-        let mem_type = memory_types
+        let memory_type = memory_types
             .iter()
             .enumerate()
-            .position(|(id, mt)| {
+            .position(|(id, mem_type)| {
                 requirements.type_mask & (1 << id) != 0 &&
-                    mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
-                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
+                    mem_type.properties.contains(hal::memory::Properties::CPU_VISIBLE)
             })
             .unwrap()
             .into();
         let memory = device
-            .allocate_memory(mem_type, requirements.size)
+            .allocate_memory(memory_type, requirements.size)
             .unwrap();
         let buffer = device
             .bind_buffer_memory(&memory, 0, unbound_buffer)
             .unwrap();
-        CopyBuffer {
+        let buffer = Buffer {
             memory,
             buffer,
-            data_stride,
-            data_width,
-            data_height,
-            row_pitch_in_bytes,
-            state: Cell::new(hal::buffer::Access::empty())
-        }
+            buffer_size: requirements.size as _,
+            buffer_len: data_len,
+            stride,
+            state: Cell::new(hal::buffer::Access::empty()),
+        };
+        buffer
     }
 
-    pub fn update<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        buffer_offset: u64,
-        image_data_width_in_bytes: u64,
-        image_data: &[T],
-        offset_alignment: usize,
-    ) -> usize {
-        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
-        let buffer_data_width_in_bytes = self.data_width * self.data_stride;
-        let mut needed_height = image_data_width_in_bytes / buffer_data_width_in_bytes as u64;
-        let last_row_length = image_data_width_in_bytes % buffer_data_width_in_bytes as u64;
-        let range = if last_row_length != 0 {
-            needed_height += 1;
-            buffer_offset ..
-                buffer_offset + ((needed_height - 1) as usize * self.row_pitch_in_bytes) as u64 + last_row_length
-        } else {
-            buffer_offset .. (buffer_offset + (needed_height as usize * self.row_pitch_in_bytes) as u64)
-        };
-
-        let mut data = device
+    pub fn update_all<T: Copy>(&self, device: &B::Device, data: &[T]) {
+        let mut upload_data = device
             .acquire_mapping_writer::<T>(
                 &self.memory,
-                range,
+                0..self.buffer_size as u64,
             )
             .unwrap();
-
-        for y in 0 .. needed_height as usize {
-            let lower_bound = y * self.data_width;
-            let upper_bound = cmp::min(lower_bound + self.data_width, image_data.len());
-            let row = &(*image_data)[lower_bound .. upper_bound];
-            let dest_base = y * self.row_pitch();
-            assert!(dest_base + row.len() <= data.len());
-            data[dest_base .. dest_base + row.len()].copy_from_slice(row);
-        }
-        device.release_mapping_writer(data);
-        (needed_height as usize * self.row_pitch() + offset_alignment) & !offset_alignment
+        upload_data[0..data.len()].copy_from_slice(&data);
+        device.release_mapping_writer(upload_data);
     }
 
-    fn row_pitch(&self) -> usize {
-        assert_eq!(self.row_pitch_in_bytes % self.data_stride, 0);
-        self.row_pitch_in_bytes / self.data_stride
+    pub fn update<T: Copy>(&self, device: &B::Device, data: &[T], offset: usize, alignment: usize) -> usize {
+        let size_aligned = (data.len() * self.stride + alignment) & !alignment;
+        let mut upload_data = device
+            .acquire_mapping_writer::<T>(
+                &self.memory,
+                (offset * self.stride) as u64 .. (size_aligned + (offset * self.stride))  as u64,
+            )
+            .unwrap();
+        upload_data[0..data.len()].copy_from_slice(&data);
+        device.release_mapping_writer(upload_data);
+        size_aligned
     }
 
     fn transit(
@@ -870,41 +692,68 @@ impl<B: hal::Backend> CopyBuffer<B> {
     }
 }
 
-pub struct InstanceBuffer<B: hal::Backend> {
+pub struct BufferPool<B: hal::Backend> {
     pub buffer: Buffer<B>,
-    pub size: usize,
+    pub data_stride: usize,
+    non_coherent_atom_size: usize,
     pub offset: usize,
+    pub size: usize,
 }
 
-impl<B: hal::Backend> InstanceBuffer<B> {
-    fn new(buffer: Buffer<B>) -> Self {
-        InstanceBuffer {
+impl<B: hal::Backend> BufferPool<B> {
+    fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        non_coherent_atom_size: usize,
+        pitch_alignment: usize,
+    ) -> Self {
+        let buffer = Buffer::new(
+            device,
+            memory_types,
+            usage,
+            pitch_alignment,
+            TEXTURE_CACHE_SIZE,
+            data_stride,
+        );
+        BufferPool {
             buffer,
-            size: 0,
+            data_stride,
+            non_coherent_atom_size,
             offset: 0,
+            size: 0,
         }
     }
 
-    fn update<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        instances: &[T],
-    ) {
-        let data_stride = self.buffer.data_stride;
-        self.buffer.update(
-            device,
-            (self.offset * data_stride) as u64,
-            (instances.len() * data_stride) as u64,
-            &instances.to_owned(),
+    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+        assert!(
+            mem::size_of::<T>() <= self.data_stride,
+            "mem::size_of::<T>()={:?} <= self.data_stride={:?}",
+            mem::size_of::<T>(), self.data_stride
         );
-
-        self.size = instances.len();
+        let buffer_len = data.len() * self.data_stride;
+        assert!(
+            self.offset * self.data_stride + buffer_len < self.buffer.buffer_size,
+            "offset({:?}) * data_stride({:?}) + buffer_len({:?}) < buffer_size({:?})",
+            self.offset, self.data_stride, buffer_len, self.buffer.buffer_size
+        );
+        self.size = self.buffer.update(
+            device,
+            data,
+            self.offset,
+            self.non_coherent_atom_size,
+        );
         self.offset += self.size;
     }
 
+    fn buffer(&self) -> &Buffer<B> {
+        &self.buffer
+    }
+
     pub fn reset(&mut self) {
-        self.size = 0;
         self.offset = 0;
+        self.size = 0;
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -912,49 +761,123 @@ impl<B: hal::Backend> InstanceBuffer<B> {
     }
 }
 
-pub struct UniformBuffer<B: hal::Backend> {
-    pub buffers: Vec<Buffer<B>>,
-    pub stride: usize,
-    pub memory_types: Vec<hal::MemoryType>,
+pub struct InstanceBufferHandler<B: hal::Backend> {
+    buffer: Buffer<B>,
+    data_stride: usize,
+    non_coherent_atom_size: usize,
+    pub offset: usize,
     pub size: usize,
 }
 
-impl<B: hal::Backend> UniformBuffer<B> {
-    fn new(stride: usize, memory_types: Vec<hal::MemoryType>) -> UniformBuffer<B> {
-        UniformBuffer {
-            buffers: vec![],
-            stride,
+impl<B: hal::Backend> InstanceBufferHandler<B> {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &Vec<hal::MemoryType>,
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        non_coherent_atom_size: usize,
+        pitch_alignment: usize,
+    ) -> Self {
+        let buffer = Buffer::new(
+            device,
             memory_types,
+            usage,
+            pitch_alignment,
+            MAX_INSTANCE_COUNT,
+            data_stride,
+        );
+        InstanceBufferHandler {
+            offset: 0,
             size: 0,
+            non_coherent_atom_size,
+            buffer,
+            data_stride,
         }
     }
 
-    fn add<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        instances: &[T],
-    ) {
-        if self.buffers.len() == self.size {
-            let buffer = Buffer::create(
-                device,
-                &self.memory_types,
-                hal::buffer::Usage::UNIFORM,
-                self.stride,
-                1,
-            );
-            self.buffers.push(buffer);
-        }
-        self.buffers[self.size].update(
-            device,
-            0 as u64,
-            (instances.len() * self.stride) as u64,
-            &instances.to_owned(),
+    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+        let buffer_len = data.len() * self.data_stride;
+        assert!(
+            self.offset * self.data_stride + buffer_len < self.buffer.buffer_size,
+            "offset({:?}) * data_stride({:?}) + buffer_len({:?}) < buffer_size({:?})",
+            self.offset, self.data_stride, buffer_len, self.buffer.buffer_size
         );
-        self.size += 1;
+        self.buffer.update(
+            device,
+            data,
+            self.offset,
+            self.non_coherent_atom_size,
+        );
+        self.size = data.len();
+        self.offset += self.size;
+    }
+
+    pub fn buffer(&self) -> &Buffer<B> {
+        &self.buffer
     }
 
     pub fn reset(&mut self) {
+        self.offset = 0;
         self.size = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
+pub struct UniformBufferHandler<B: hal::Backend> {
+    buffers: Vec<Buffer<B>>,
+    offset: usize,
+    memory_types: Vec<hal::MemoryType>,
+    usage: hal::buffer::Usage,
+    data_stride: usize,
+    pitch_alignment: usize,
+}
+
+impl<B: hal::Backend> UniformBufferHandler<B> {
+    pub fn new(
+        memory_types: &Vec<hal::MemoryType>,
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        pitch_alignment: usize,
+    ) -> Self {
+        UniformBufferHandler {
+            buffers: vec!(),
+            offset: 0,
+            memory_types: memory_types.clone(),
+            usage,
+            data_stride,
+            pitch_alignment,
+        }
+    }
+
+    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+        if self.buffers.len() == self.offset {
+            self.buffers.push(
+                Buffer::new(
+                    device,
+                    &self.memory_types,
+                    self.usage,
+                    self.pitch_alignment,
+                    data.len(),
+                    self.data_stride,
+                )
+            );
+        }
+        self.buffers[self.offset].update_all(
+            device,
+            data,
+        );
+        self.offset+=1;
+    }
+
+    pub fn buffer(&self) -> &Buffer<B> {
+        &self.buffers[self.offset - 1]
+    }
+
+    pub fn reset(&mut self) {
+        self.offset = 0;
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -964,14 +887,87 @@ impl<B: hal::Backend> UniformBuffer<B> {
     }
 }
 
+pub struct VertexBufferHandler<B: hal::Backend> {
+    buffer: Buffer<B>,
+    memory_types: Vec<hal::MemoryType>,
+    usage: hal::buffer::Usage,
+    data_stride: usize,
+    pitch_alignment: usize,
+    pub buffer_len: usize,
+}
+
+impl<B: hal::Backend> VertexBufferHandler<B> {
+    pub fn new<T: Copy>(
+        device: &B::Device,
+        memory_types: &Vec<hal::MemoryType>,
+        usage: hal::buffer::Usage,
+        data: &[T],
+        data_stride: usize,
+        pitch_alignment: usize,
+    ) -> Self {
+        let buffer = Buffer::new(
+            device,
+            memory_types,
+            usage,
+            pitch_alignment,
+            data.len(),
+            data_stride,
+        );
+        buffer.update_all(device, data);
+        VertexBufferHandler {
+            buffer_len: buffer.buffer_len,
+            buffer,
+            memory_types: memory_types.clone(),
+            usage,
+            data_stride,
+            pitch_alignment,
+        }
+    }
+
+    pub fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+        let buffer_len = data.len() * self.data_stride;
+        if self.buffer.buffer_len < buffer_len {
+            let old_buffer = mem::replace(
+                &mut self.buffer,
+                Buffer::new(
+                    device,
+                    &self.memory_types,
+                    self.usage,
+                    self.pitch_alignment,
+                    data.len(),
+                    self.data_stride,
+                )
+            );
+            old_buffer.deinit(device);
+        }
+        self.buffer.update_all(
+            device,
+            data,
+        );
+        self.buffer_len = buffer_len;
+    }
+
+    pub fn buffer(&self) -> &Buffer<B> {
+        &self.buffer
+    }
+
+    pub fn reset(&mut self) {
+        self.buffer_len = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
 pub(crate) struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, u32>,
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
-    pub vertex_buffer: Buffer<B>,
-    pub index_buffer: Option<Buffer<B>>,
-    pub instance_buffer: SmallVec<[InstanceBuffer<B>; 1]>,
-    pub locals_buffer: SmallVec<[UniformBuffer<B>; 1]>,
+    pub vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
+    pub index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
+    pub instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
+    pub locals_buffer: SmallVec<[UniformBufferHandler<B>; 1]>,
     shader_name: String,
     shader_kind: ShaderKind,
 }
@@ -981,7 +977,8 @@ impl<B: hal::Backend> Program<B> {
         pipeline_requirements: PipelineRequirements,
         device: &B::Device,
         pipeline_layout: B::PipelineLayout,
-        memory_types: &[hal::MemoryType],
+        memory_types: &Vec<hal::MemoryType>,
+        limits: &hal::Limits,
         shader_name: &str,
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
@@ -1112,44 +1109,13 @@ impl<B: hal::Backend> Program<B> {
         device.destroy_shader_module(vs_module);
         device.destroy_shader_module(fs_module);
 
-        let (vertex_buffer_stride, vertex_buffer_len) = match shader_kind {
+        let vertex_buffer_stride = match shader_kind {
             #[cfg(feature = "debug_renderer")]
-            ShaderKind::DebugColor => {
-                let stride = mem::size_of::<DebugColorVertex>();
-                (stride, MAX_DEBUG_COLOR_VERTEX_COUNT * stride)
-            },
+            ShaderKind::DebugColor => mem::size_of::<DebugColorVertex>(),
             #[cfg(feature = "debug_renderer")]
-            ShaderKind::DebugFont => {
-                let stride = mem::size_of::<DebugFontVertex>();
-                (stride, MAX_DEBUG_FONT_VERTEX_COUNT * stride)
-            },
-            _ => {
-                let stride = mem::size_of::<Vertex>();
-                (stride, QUAD.len() * stride)
-            },
+            ShaderKind::DebugFont => mem::size_of::<DebugFontVertex>(),
+            _ => mem::size_of::<Vertex>(),
         };
-
-        let mut vertex_buffer = Buffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::VERTEX,
-            vertex_buffer_stride,
-            vertex_buffer_len,
-        );
-
-        let mut index_buffer = None;
-
-        if shader_kind.is_debug() {
-            index_buffer = Some(Buffer::create(
-                device,
-                memory_types,
-                hal::buffer::Usage::INDEX,
-                mem::size_of::<u32>(),
-                shader_kind.max_possible_index_buffer_len(),
-            ));
-        } else {
-            vertex_buffer.update(device, 0, (QUAD.len() * vertex_buffer_stride) as u64, &QUAD);
-        }
 
         let instance_buffer_stride = match shader_kind {
             ShaderKind::Primitive |
@@ -1163,27 +1129,55 @@ impl<B: hal::Backend> Program<B> {
             _ => unreachable!()
         };
 
-        let locals_buffer_stride = mem::size_of::<Locals>();
-
-        let instance_buffer_len = if shader_kind.is_debug() { 1 } else { MAX_INSTANCE_COUNT * instance_buffer_stride };
-
+        let mut vertex_buffer = SmallVec::new();
         let mut instance_buffer = SmallVec::new();
         let mut locals_buffer = SmallVec::new();
+        let mut index_buffer = if shader_kind.is_debug() {
+            Some(SmallVec::new())
+        } else {
+            None
+        };
         for _ in 0..MAX_FRAME_COUNT {
+            vertex_buffer.push(
+                VertexBufferHandler::new(
+                    device,
+                    memory_types,
+                    hal::buffer::Usage::VERTEX,
+                    &QUAD,
+                    vertex_buffer_stride,
+                    (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                )
+            );
             instance_buffer.push(
-                InstanceBuffer::new(
-                    Buffer::create(
-                        device,
-                        memory_types,
-                        hal::buffer::Usage::VERTEX,
-                        instance_buffer_stride,
-                        instance_buffer_len,
-                    )
+                InstanceBufferHandler::new(
+                    device,
+                    memory_types,
+                    hal::buffer::Usage::VERTEX,
+                    instance_buffer_stride,
+                    (limits.non_coherent_atom_size - 1) as usize,
+                    (limits.min_buffer_copy_pitch_alignment - 1) as usize,
                 )
             );
             locals_buffer.push(
-                UniformBuffer::new(locals_buffer_stride, memory_types.to_vec())
+                UniformBufferHandler::new(
+                    memory_types,
+                    hal::buffer::Usage::UNIFORM,
+                    mem::size_of::<Locals>(),
+                    (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+                )
             );
+            if let Some(ref mut index_buffer) = index_buffer {
+                index_buffer.push(
+                    VertexBufferHandler::new(
+                        device,
+                        memory_types,
+                        hal::buffer::Usage::INDEX,
+                        &vec![0u32; MAX_INDEX_COUNT],
+                        mem::size_of::<u32>(),
+                        (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                    )
+                );
+            }
         }
 
         let bindings_map = pipeline_requirements.bindings_map;
@@ -1209,7 +1203,7 @@ impl<B: hal::Backend> Program<B> {
         buffer_id: usize,
     ) {
         if !instances.is_empty() {
-            self.instance_buffer[buffer_id].update(
+            self.instance_buffer[buffer_id].add(
                 device,
                 instances,
             );
@@ -1242,7 +1236,7 @@ impl<B: hal::Backend> Program<B> {
                 binding: self.bindings_map["Locals"],
                 array_offset: 0,
                 descriptors: Some(
-                    hal::pso::Descriptor::Buffer(&self.locals_buffer[buffer_id].buffers[self.locals_buffer[buffer_id].size - 1].buffer, Some(0)..Some(self.locals_buffer[buffer_id].stride as u64))
+                    hal::pso::Descriptor::Buffer(&self.locals_buffer[buffer_id].buffer().buffer, Some(0)..None),
                 ),
             },
         ]);
@@ -1286,6 +1280,8 @@ impl<B: hal::Backend> Program<B> {
         next_id: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
+        let vertex_buffer = &self.vertex_buffer[next_id];
+        let instance_buffer = &self.instance_buffer[next_id];
 
         cmd_buffer.set_viewports(0, &[viewport.clone()]);
         match scissor_rect {
@@ -1297,21 +1293,29 @@ impl<B: hal::Backend> Program<B> {
         }
         cmd_buffer.bind_graphics_pipeline(
             &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
-        cmd_buffer.bind_vertex_buffers(
-            0,
-            vec![
-                (&self.vertex_buffer.buffer, 0),
-                (&self.instance_buffer[next_id].buffer.buffer, 0),
-            ],
-        );
+
 
         if let Some(ref index_buffer) = self.index_buffer {
+            cmd_buffer.bind_vertex_buffers(
+                0,
+                vec![
+                    (&vertex_buffer.buffer().buffer, 0),
+                ],
+            );
             cmd_buffer.bind_index_buffer(
                 hal::buffer::IndexBufferView {
-                    buffer: &index_buffer.buffer,
+                    buffer: &index_buffer[next_id].buffer().buffer,
                     offset: 0,
                     index_type: hal::IndexType::U32,
                 }
+            );
+        } else {
+            cmd_buffer.bind_vertex_buffers(
+                0,
+                vec![
+                    (&vertex_buffer.buffer().buffer, 0),
+                    (&instance_buffer.buffer().buffer, 0),
+                ],
             );
         }
 
@@ -1337,14 +1341,16 @@ impl<B: hal::Backend> Program<B> {
 
             if let Some(ref index_buffer) = self.index_buffer {
                 encoder.draw_indexed(
-                    0 .. (index_buffer.data_len / index_buffer.data_stride) as u32,
+                    0 .. index_buffer[next_id].buffer().buffer_len as u32,
                     0,
                     0 .. 1,
                 );
             } else {
+                let offset = instance_buffer.offset as u32;
+                let size = instance_buffer.size as u32;
                 encoder.draw(
-                    0 .. QUAD.len() as _,
-                    (self.instance_buffer[next_id].offset - self.instance_buffer[next_id].size) as u32 .. self.instance_buffer[next_id].offset as u32,
+                    0 .. vertex_buffer.buffer_len as _,
+                    (offset - size) .. offset,
                 );
             }
         }
@@ -1353,14 +1359,18 @@ impl<B: hal::Backend> Program<B> {
     }
 
     pub fn deinit(mut self, device: &B::Device) {
-        self.vertex_buffer.deinit(device);
-        if let Some(index_buffer) = self.index_buffer {
-            index_buffer.deinit(device);
+        for mut vertex_buffer in self.vertex_buffer {
+            vertex_buffer.deinit(device);
         }
-        for instance_buffer in self.instance_buffer {
+        if let Some(index_buffer) = self.index_buffer {
+            for mut index_buffer in index_buffer {
+                index_buffer.deinit(device);
+            }
+        }
+        for mut instance_buffer in self.instance_buffer {
             instance_buffer.deinit(device);
         }
-        for locals_buffer in self.locals_buffer {
+        for mut locals_buffer in self.locals_buffer {
             locals_buffer.deinit(device);
         }
         device.destroy_pipeline_layout(self.pipeline_layout);
@@ -1668,14 +1678,13 @@ struct Fence<B: hal::Backend> {
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
-    pub upload_memory_type: hal::MemoryTypeId,
-    pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
     surface: Option<B::Surface>,
     pub surface_format: hal::format::Format,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
+    pub staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
     pub render_pass: Option<RenderPass<B>>,
     pub framebuffers: Vec<B::Framebuffer>,
@@ -1754,28 +1763,12 @@ impl<B: hal::Backend> Device<B> {
             .physical_device
             .memory_properties()
             .memory_types;
+        println!("memory_types: {:?}", memory_types);
+
         let limits = adapter
             .physical_device
             .limits();
         let max_texture_size = 4400u32; // TODO use limits after it points to the correct texture size
-
-        let upload_memory_type: hal::MemoryTypeId = memory_types
-            .iter()
-            .position(|mt| {
-                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
-                //&&!mt.properties.contains(hal::memory::Properties::CPU_CACHED)
-            })
-            .unwrap()
-            .into();
-        let download_memory_type = memory_types
-            .iter()
-            .position(|mt| {
-                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE | hal::memory::Properties::CPU_CACHED)
-            })
-            .unwrap()
-            .into();
-        info!("upload memory: {:?}", upload_memory_type);
-        info!("download memory: {:?}", &download_memory_type);
 
         let queue_family = adapter.queue_families
             .iter()
@@ -1828,6 +1821,7 @@ impl<B: hal::Backend> Device<B> {
         let mut descriptor_pools = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
+        let mut staging_buffer_pool = SmallVec::new();
         for _ in 0..MAX_FRAME_COUNT {
             descriptor_pools.push(
                 DescriptorPools::new(
@@ -1855,6 +1849,16 @@ impl<B: hal::Backend> Device<B> {
             command_pool.push(
                 cp
             );
+            staging_buffer_pool.push(
+                BufferPool::new(
+                    &device,
+                    &memory_types,
+                    hal::buffer::Usage::TRANSFER_SRC,
+                    1,
+                    (limits.non_coherent_atom_size - 1) as usize,
+                    (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                )
+            );
         }
 
         let image_available_semaphore = device.create_semaphore();
@@ -1864,13 +1868,12 @@ impl<B: hal::Backend> Device<B> {
             device,
             limits,
             memory_types,
-            upload_memory_type,
-            download_memory_type,
             surface_format,
             surface: Some(surface),
             depth_format,
             queue_group,
             command_pool,
+            staging_buffer_pool,
             swap_chain: Some(swap_chain),
             render_pass: Some(render_pass),
             framebuffers,
@@ -2221,16 +2224,14 @@ impl<B: hal::Backend> Device<B> {
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
     }
 
-    fn reset_image_buffer_offsets(&mut self) {
-        for img in self.images.values_mut() {
-            img.upload_buffer.reset();
-        }
-    }
-
     fn reset_program_buffer_offsets(&mut self) {
         for program in self.programs.values_mut() {
             program.instance_buffer[self.next_id].reset();
             program.locals_buffer[self.next_id].reset();
+            if let Some(ref mut index_buffer) = program.index_buffer {
+                index_buffer[self.next_id].reset();
+                program.vertex_buffer[self.next_id].reset();
+            }
         }
     }
 
@@ -2259,6 +2260,7 @@ impl<B: hal::Backend> Device<B> {
             &self.device,
             self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]),
             &self.memory_types,
+            &self.limits,
             &name,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
@@ -2324,22 +2326,25 @@ impl<B: hal::Backend> Device<B> {
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
         if let Some(ref mut index_buffer) = program.index_buffer {
-            let index_buffer_len = indices.len() * index_buffer.data_stride;
-            index_buffer.update(&self.device, 0, index_buffer_len as u64, &indices);
+            index_buffer[self.next_id].update(
+                &self.device,
+                indices,
+            );
         } else {
             warn!("This function is for debug shaders only!");
         }
     }
 
-    #[cfg(feature = "debug_renderer")]
     pub fn update_vertices<T: Copy>(&mut self, vertices: &[T]) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
         if program.shader_name.contains("debug") {
-            let vertex_buffer_len = vertices.len() * program.vertex_buffer.data_stride;
-            program.vertex_buffer.update(&self.device, 0, vertex_buffer_len as u64, &vertices);
+            program.vertex_buffer[self.next_id].update(
+                &self.device,
+                vertices,
+            );
         } else {
             warn!("This function is for debug shaders only!");
         }
@@ -2659,7 +2664,6 @@ impl<B: hal::Backend> Device<B> {
             texture.layer_count,
             view_kind,
             mip_levels,
-            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         assert_eq!(texture.fbo_ids.len(), 0);
@@ -2740,13 +2744,13 @@ impl<B: hal::Backend> Device<B> {
                             .update(
                                 &mut self.device,
                                 &mut self.command_pool[self.next_id],
+                                &mut self.staging_buffer_pool[self.next_id],
                                 DeviceUintRect::new(
                                     DeviceUintPoint::new(0, 0),
                                     DeviceUintSize::new(texture.width, texture.height),
                                 ),
                                 i,
                                 texels_to_u8_slice(&data[start .. (start + len)]),
-                                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                             )
                     );
             }
@@ -3168,15 +3172,13 @@ impl<B: hal::Backend> Device<B> {
         } else {
             (&self.frame_images[self.current_frame_id], 0)
         };
-        let download_buffer: CopyBuffer<B> = CopyBuffer::create(
+        let download_buffer: Buffer<B> = Buffer::new(
             &self.device,
             &self.memory_types,
             hal::buffer::Usage::TRANSFER_DST,
-            1,
-            (rect.size.width * bytes_per_pixel) as usize,
-            rect.size.height as usize,
-            1,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+            output.len(),
+            1,
         );
 
         let mut command_pool = self.device.create_command_pool_typed(
@@ -3256,33 +3258,30 @@ impl<B: hal::Backend> Device<B> {
         self.device.wait_for_fence(&copy_fence, !0);
         self.device.destroy_fence(copy_fence);
 
+        let mut data = vec![0; download_buffer.buffer_size];
         if let Ok(reader) = self.device
-            .acquire_mapping_reader::<[u8; 4]>(
+            .acquire_mapping_reader::<u8>(
                 &download_buffer.memory,
-                0 .. (rect.size.width * rect.size.height * bytes_per_pixel as u32) as u64,
+                0 .. download_buffer.buffer_size as u64,
             )
-            {
-                assert_eq!(reader.len() * 4, output.len());
-                let mut offset = 0;
-                let (i0, i1, i2, i3) = if capture_read {
-                    (0, 1, 2, 3)
-                } else {
-                    match self.surface_format.base_format().0 {
-                        hal::format::SurfaceType::B8_G8_R8_A8 => (2, 1, 0, 3),
-                        _ => (0, 1, 2, 3),
-                    }
-                };
-                for d in reader.iter() {
-                    let data = *d;
-                    output[offset + 0] = data[i0];
-                    output[offset + 1] = data[i1];
-                    output[offset + 2] = data[i2];
-                    output[offset + 3] = data[i3];
-                    offset += 4;
-                }
-                self.device.release_mapping_reader(reader);
-            } else {
+        {
+            data[0..reader.len()].copy_from_slice(&reader);
+            self.device.release_mapping_reader(reader);
+        } else {
             panic!("Fail to read the download buffer!");
+        }
+        data.truncate(output.len());
+        if !capture_read && self.surface_format.base_format().0 == hal::format::SurfaceType::B8_G8_R8_A8 {
+            let mut offset = 0;
+            for _ in 0..output.len()/4 {
+                output[offset + 0] = data[offset + 2];
+                output[offset + 1] = data[offset + 1];
+                output[offset + 2] = data[offset + 0];
+                output[offset + 3] = data[offset + 3];
+                offset += 4;
+            }
+        } else {
+            output.swap_with_slice(&mut data);
         }
 
         download_buffer.deinit(&self.device);
@@ -3347,9 +3346,8 @@ impl<B: hal::Backend> Device<B> {
         _vertices: &[V],
         _usage_hint: VertexUsageHint,
     ) {
-        if self.bound_program != INVALID_PROGRAM_ID {
-            #[cfg(feature = "debug_renderer")]
-                self.update_vertices(&_vertices.iter().map(|v| v.to_primitive_type()).collect::<Vec<_>>());
+        if cfg!(feature = "debug_renderer") && self.bound_program != INVALID_PROGRAM_ID {
+            self.update_vertices(&_vertices.iter().map(|v| v.to_primitive_type()).collect::<Vec<_>>());
         }
     }
 
@@ -3750,13 +3748,13 @@ impl<B: hal::Backend> Device<B> {
         };
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
         self.reset_state();
-        self.reset_image_buffer_offsets();
         if self.frame_fence[self.next_id].is_submitted {
             self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0);
             self.device.reset_fence(&self.frame_fence[self.next_id].inner);
             self.frame_fence[self.next_id].is_submitted = false;
         }
         self.command_pool[self.next_id].reset();
+        self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset();
         self.reset_program_buffer_offsets();
         return !present_error;
@@ -3786,6 +3784,9 @@ impl<B: hal::Backend> Device<B> {
     pub fn deinit(self) {
         for command_pool in self.command_pool {
             self.device.destroy_command_pool(command_pool.into_raw());
+        }
+        for mut staging_buffer_pool in self.staging_buffer_pool {
+            staging_buffer_pool.deinit(&self.device);
         }
         for image in self.frame_images {
             image.deinit(&self.device);
@@ -3874,10 +3875,10 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
                     .update(
                         &mut self.device.device,
                         &mut self.device.command_pool[self.device.next_id],
+                        &mut self.device.staging_buffer_pool[self.device.next_id],
                         rect,
                         layer_index,
                         data,
-                        (self.device.limits.min_buffer_copy_offset_alignment - 1) as usize,
                     )
             );
 
