@@ -720,7 +720,7 @@ impl<B: hal::Backend> StagingBuffer<B> {
         image_data: &[T],
     ) -> Self {
         let buffer_size= (image_data.len() + pitch_alignment) & !pitch_alignment;
-        assert_eq!(buffer_size % image_data.len(), 0);
+        //assert_eq!(buffer_size % image_data.len(), 0);
         let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
         let requirements = device.get_buffer_requirements(&unbound_buffer);
         let mem_type = memory_types
