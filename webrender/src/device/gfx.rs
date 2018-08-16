@@ -1662,7 +1662,7 @@ pub struct Device<B: hal::Backend> {
     pub upload_memory_type: hal::MemoryTypeId,
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
-    surface: B::Surface,
+    surface: Option<B::Surface>,
     pub surface_format: hal::format::Format,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
@@ -1789,7 +1789,14 @@ impl<B: hal::Backend> Device<B> {
             frame_depth,
             frame_images,
             viewport
-        ) = Device::init_swapchain_resources(&device, &memory_types, &adapter, &mut surface, window_size);
+        ) = Device::init_swapchain_resources(
+            &device,
+            &memory_types,
+            Some(&adapter),
+            &mut surface,
+            None,
+            window_size
+        );
 
         // Samplers
 
@@ -1850,7 +1857,7 @@ impl<B: hal::Backend> Device<B> {
             upload_memory_type,
             download_memory_type,
             surface_format,
-            surface,
+            surface: Some(surface),
             depth_format,
             queue_group,
             command_pool,
@@ -1906,9 +1913,8 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub(crate) fn recreate_swapchain(&mut self, init: DeviceInit<B>) {
-        self.device.wait_idle().unwrap();
-        self.reset_command_pools();
+    pub(crate) fn recreate_swapchain(&mut self, init: Option<DeviceInit<B>>) -> DeviceUintSize {
+        self.wait_for_resources_and_reset();
         // Maybe call other reset functions as well?
 
         for (_id, program) in self.programs.drain() {
@@ -1932,21 +1938,31 @@ impl<B: hal::Backend> Device<B> {
 
         self.device.destroy_swapchain(self.swap_chain.take().unwrap());
 
-        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
+        let (adapter, mut surface, window_size, surface_format) = match init {
+            Some(init) => (Some(init.adapter), init.surface, init.window_size, None),
+            None => (None, self.surface.take().unwrap(), (self.viewport.rect.w as u32, self.viewport.rect.h as u32), Some(self.surface_format)),
+        };
 
         let (
             swap_chain,
-            _surface_format,
-            _depth_format,
+            surface_format,
+            depth_format,
             render_pass,
             framebuffers,
             framebuffers_depth,
             frame_depth,
             frame_images,
             viewport
-        ) = Device::init_swapchain_resources(&self.device, &self.memory_types, &adapter, &mut surface, window_size);
+        ) = Device::init_swapchain_resources(
+            &self.device,
+            &self.memory_types,
+            adapter,
+            &mut surface,
+            surface_format,
+            window_size
+        );
 
-        self.surface = surface;
+        self.surface = Some(surface);
         self.swap_chain = Some(swap_chain);
         self.render_pass = Some(render_pass);
         self.framebuffers = framebuffers;
@@ -1954,13 +1970,17 @@ impl<B: hal::Backend> Device<B> {
         self.frame_depth = Some(frame_depth);
         self.frame_images = frame_images;
         self.viewport = viewport;
+        self.surface_format = surface_format;
+        self.depth_format = depth_format;
+        DeviceUintSize::new(self.viewport.rect.w as u32, self.viewport.rect.h as u32)
     }
 
     fn init_swapchain_resources(
         device: &B::Device,
         memory_types: &[hal::MemoryType],
-        adapter: &hal::Adapter<B>,
+        adapter: Option<&hal::Adapter<B>>,
         surface: &mut B::Surface,
+        surface_format: Option<hal::format::Format>,
         window_size: (u32, u32),
     ) -> (
         B::Swapchain,
@@ -1973,30 +1993,42 @@ impl<B: hal::Backend> Device<B> {
         Vec<ImageCore<B>>,
         hal::pso::Viewport,
     ) {
-        let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
-        let surface_format = formats
-            .map_or(
-                hal::format::Format::Bgra8Unorm,
-                |formats| {
-                    formats
-                        .into_iter()
-                        .find(|format| {
-                            format == &hal::format::Format::Bgra8Unorm
-                        })
-                        .unwrap()
-                },
-            );
+        let (surface_format, extent) = match adapter {
+            Some(adapter) => {
+                let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
+                let surface_format = formats
+                    .map_or(
+                        hal::format::Format::Bgra8Unorm,
+                        |formats| {
+                            formats
+                                .into_iter()
+                                .find(|format| {
+                                    format == &hal::format::Format::Bgra8Unorm
+                                })
+                                .unwrap()
+                        },
+                    );
 
-        let mut extent = caps.current_extent.unwrap_or(
-            hal::window::Extent2D {
-                width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
-                height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
-            }
-        );
+                let mut extent = caps.current_extent.unwrap_or(
+                    hal::window::Extent2D {
+                        width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
+                        height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
+                    }
+                );
 
-        //TODO: Implement headless mode and use it if we have zero size
-        if extent.width == 0 { extent.width = 1; }
-        if extent.height == 0 { extent.height = 1; }
+                if extent.width == 0 { extent.width = 1; }
+                if extent.height == 0 { extent.height = 1; }
+                (surface_format, extent)
+            },
+            None => {
+                let mut extent =
+                    hal::window::Extent2D {
+                        width: window_size.0,
+                        height: window_size.1,
+                    };
+                (surface_format.unwrap_or(hal::format::Format::Bgra8Unorm), extent)
+            },
+        };
 
         let swap_config = SwapchainConfig::new()
             .with_color(surface_format)
@@ -3525,7 +3557,10 @@ impl<B: hal::Backend> Device<B> {
             } else {
                 DeviceIntRect::new(DeviceIntPoint::zero(), DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _))
             };
-            if rect == target_rect {
+            if rect.size.width > target_rect.size.width || rect.size.height > target_rect.size.height {
+                // This can happen, when we resize
+                self.clear_target_image(color, depth);
+            } else if rect == target_rect {
                 self.clear_target_image(color, depth);
             } else {
                 self.clear_target_rect(rect, color, depth);
@@ -3632,12 +3667,19 @@ impl<B: hal::Backend> Device<B> {
         warn!("echo_driver_messages is unimplemeneted");
     }
 
-    pub fn set_next_frame_id(&mut self) {
-        self.current_frame_id = self.swap_chain.as_mut().unwrap()
-            .acquire_image(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
+    pub fn set_next_frame_id(&mut self) -> bool {
+        match self.swap_chain.as_mut().unwrap()
+            .acquire_image(FrameSync::Semaphore(&mut self.image_available_semaphore))
+        {
+            Ok(id) => {
+                self.current_frame_id = id as _;
+                true
+            },
+            Err(_) => false,
+        }
     }
 
-    pub fn swap_buffers(&mut self) {
+    pub fn submit_to_gpu(&mut self) -> bool {
         {
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
             let image = &self.frame_images[self.current_frame_id];
@@ -3655,7 +3697,7 @@ impl<B: hal::Backend> Device<B> {
             self.upload_queue.push(cmd_buffer.finish());
         }
 
-        {
+        let present_error = {
             let submission = Submission::new()
                 .wait_on(&[(&self.image_available_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .signal(Some(&self.render_finished_semaphore))
@@ -3668,8 +3710,8 @@ impl<B: hal::Backend> Device<B> {
                 .present(
                     &mut self.queue_group.queues[0],
                     self.current_frame_id as _,
-                    Some(&self.render_finished_semaphore)).unwrap();
-        }
+                    Some(&self.render_finished_semaphore)).is_err()
+        };
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
         self.reset_state();
         self.reset_image_buffer_offsets();
@@ -3681,6 +3723,7 @@ impl<B: hal::Backend> Device<B> {
         self.command_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset();
         self.reset_program_buffer_offsets();
+        return !present_error;
     }
 
     pub fn wait_for_resources_and_reset(&mut self) {

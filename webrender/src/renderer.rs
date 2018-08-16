@@ -1694,9 +1694,10 @@ impl<B: hal::Backend> Renderer<B>
     }
 
     #[cfg(not(feature = "gleam"))]
-    pub fn resize(&mut self, init: DeviceInit<B>,) {
+    pub fn resize(&mut self, init: Option<DeviceInit<B>>) -> DeviceUintSize {
         self.shaders.reset();
-        self.device.recreate_swapchain(init);
+        let size = self.device.recreate_swapchain(init);
+        size
     }
 
     #[cfg(not(feature = "debugger"))]
@@ -2035,8 +2036,10 @@ impl<B: hal::Backend> Renderer<B>
             samplers
         };
 
-        #[cfg(not(feature = "gleam"))]
-        self.device.set_next_frame_id();
+        if !cfg!(feature = "gleam") && !self.device.set_next_frame_id() {
+            self.resize(None);
+            return Ok(RendererStats::empty());
+        }
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2202,8 +2205,10 @@ impl<B: hal::Backend> Renderer<B>
             self.last_time = current_time;
         }
 
-        #[cfg(not(feature = "gleam"))]
-        self.device.swap_buffers();
+        if !cfg!(feature = "gleam") && !self.device.submit_to_gpu() {
+            self.resize(None);
+            return Ok(RendererStats::empty());
+        }
         if self.renderer_errors.is_empty() {
             Ok(stats)
         } else {

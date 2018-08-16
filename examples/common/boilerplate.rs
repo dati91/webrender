@@ -209,7 +209,7 @@ pub fn main_wrapper<E: Example>(
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
-    let framebuffer_size = {
+    let mut framebuffer_size = {
         let size = window
             .get_inner_size()
             .unwrap()
@@ -237,7 +237,7 @@ pub fn main_wrapper<E: Example>(
 
     let epoch = Epoch(0);
     let pipeline_id = PipelineId(0, 0);
-    let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+    let mut layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
     let mut txn = Transaction::new();
 
@@ -325,13 +325,26 @@ pub fn main_wrapper<E: Example>(
                 event: winit::WindowEvent::Resized(dims),
                 ..
             } => {
-                let init = webrender::DeviceInit {
-                    adapter: &adapter,
-                    surface: instance.create_surface(&window),
-                    window_size: (dims.width as u32, dims.height as u32),
-                };
+                let new_size = DeviceUintSize::new((dims.width as f32 * device_pixel_ratio) as u32, (dims.height as f32 * device_pixel_ratio) as u32);
+                println!("framebuffer_size({:?}) != new_size({:?}) => {:?}", framebuffer_size, new_size, framebuffer_size != new_size);
+                if framebuffer_size != new_size {
+                    let init = webrender::DeviceInit {
+                        adapter: &adapter,
+                        surface: instance.create_surface(&window),
+                        window_size: (new_size.width as u32, new_size.height as u32),
+                    };
 
-                renderer.resize(init);
+                    let real_size = renderer.resize(Some(init));
+                    framebuffer_size = real_size;
+                    layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+                    api.set_window_parameters(
+                        document_id,
+                        framebuffer_size,
+                        DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
+                        device_pixel_ratio,
+                    );
+                    return winit::ControlFlow::Continue;
+                }
             },
             winit::Event::WindowEvent { event, .. } => custom_event = example.on_event(
                 event,
