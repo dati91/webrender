@@ -568,7 +568,7 @@ impl<B: hal::Backend> Image<B> {
             hal::image::Layout::TransferDstOptimal,
             &[
                 hal::command::BufferImageCopy {
-                    buffer_offset: (staging_buffer_pool.offset - staging_buffer_pool.size) as _,
+                    buffer_offset: staging_buffer_pool.buffer_offset as _,
                     buffer_width: size.width,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
@@ -707,8 +707,10 @@ pub struct BufferPool<B: hal::Backend> {
     pub buffer: Buffer<B>,
     pub data_stride: usize,
     non_coherent_atom_size: usize,
-    pub offset: usize,
-    pub size: usize,
+    copy_alignment: usize,
+    offset: usize,
+    size: usize,
+    pub buffer_offset: usize,
 }
 
 impl<B: hal::Backend> BufferPool<B> {
@@ -719,6 +721,7 @@ impl<B: hal::Backend> BufferPool<B> {
         data_stride: usize,
         non_coherent_atom_size: usize,
         pitch_alignment: usize,
+        copy_alignment: usize,
     ) -> Self {
         let buffer = Buffer::new(
             device,
@@ -732,8 +735,10 @@ impl<B: hal::Backend> BufferPool<B> {
             buffer,
             data_stride,
             non_coherent_atom_size,
+            copy_alignment,
             offset: 0,
             size: 0,
+            buffer_offset: 0,
         }
     }
 
@@ -755,7 +760,8 @@ impl<B: hal::Backend> BufferPool<B> {
             self.offset,
             self.non_coherent_atom_size,
         );
-        self.offset += self.size;
+        self.buffer_offset = self.offset;
+        self.offset += (self.size + self.copy_alignment) & !self.copy_alignment;
     }
 
     fn buffer(&self) -> &Buffer<B> {
@@ -1868,6 +1874,7 @@ impl<B: hal::Backend> Device<B> {
                     1,
                     (limits.non_coherent_atom_size - 1) as usize,
                     (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                    (limits.min_buffer_copy_offset_alignment - 1) as usize,
                 )
             );
         }
