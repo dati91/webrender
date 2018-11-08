@@ -562,6 +562,14 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
                 rate: 1,
             }
         );
+    } else if file_name.starts_with("cs_line") {
+        descriptors.push(
+            VertexBufferDesc {
+                binding: 1,
+                stride: mem::size_of::<LineDecorationInstance>() as _,
+                rate: 1,
+            }
+        );
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
             VertexBufferDesc {
