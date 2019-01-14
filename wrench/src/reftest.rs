@@ -306,34 +306,37 @@ impl<'a> ReftestHarness<'a> {
         ReftestHarness { wrench, window, rx }
     }
 
-    pub fn run(mut self, base_manifest: &Path, reftests: Option<&Path>, options: &ReftestOptions) -> usize {
-        let manifest = ReftestManifest::new(base_manifest, options);
+    pub fn run(mut self, base_manifest: &Path, reftests: Option<&Path>, options: &ReftestOptions, mut events_loop: winit::EventsLoop) -> usize {
+        let manifest = ReftestManifest::new(base_manifest.clone(), options);
         let reftests = manifest.find(reftests.unwrap_or(&PathBuf::new()));
 
         let mut total_passing = 0;
         let mut failing = Vec::new();
 
-        for t in reftests {
-            if self.run_reftest(t) {
-                total_passing += 1;
-            } else {
-                failing.push(t);
+        events_loop.run_forever(|global_event| {
+            for t in reftests.clone() {
+                if self.run_reftest(t) {
+                    total_passing += 1;
+                } else {
+                    failing.push(t);
+                }
             }
-        }
 
-        println!(
-            "REFTEST INFO | {} passing, {} failing",
-            total_passing,
-            failing.len()
-        );
+            println!(
+                "REFTEST INFO | {} passing, {} failing",
+                total_passing,
+                failing.len()
+            );
 
-        if !failing.is_empty() {
-            println!("\nReftests with unexpected results:");
+            if !failing.is_empty() {
+                println!("\nReftests with unexpected results:");
 
-            for reftest in &failing {
-                println!("\t{}", reftest);
+                for reftest in &failing {
+                    println!("\t{}", reftest);
+                }
             }
-        }
+            winit::ControlFlow::Break
+        });
 
         failing.len()
     }

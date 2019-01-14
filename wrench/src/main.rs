@@ -463,7 +463,8 @@ fn reftest<'a>(
     mut wrench: Wrench,
     window: &mut WindowWrapper,
     subargs: &clap::ArgMatches<'a>,
-    rx: Receiver<NotifierEvent>
+    rx: Receiver<NotifierEvent>,
+    mut events_loop: winit::EventsLoop,
 ) -> usize {
     let dim = window.get_inner_size();
     let base_manifest = Path::new("reftests/reftest.list");
@@ -474,7 +475,7 @@ fn reftest<'a>(
         reftest_options.allow_num_differences = dim.width as usize * dim.height as usize;
     }
     let num_failures = ReftestHarness::new(&mut wrench, window, &rx)
-        .run(base_manifest, specific_reftest, &reftest_options);
+        .run(base_manifest, specific_reftest, &reftest_options, events_loop);
     wrench.shut_down(rx);
     num_failures
 }
@@ -612,7 +613,7 @@ fn main() {
         png::png(&mut wrench, surface, &mut window, reader, rx.unwrap());
     } else if let Some(subargs) = args.subcommand_matches("reftest") {
         // Exit with an error code in order to ensure the CI job fails.
-        let _ = reftest(wrench, &mut window, subargs, rx.unwrap());
+        let _ = reftest(wrench, &mut window, subargs, rx.unwrap(), events_loop.unwrap());
         process::exit(0);
     } else if let Some(_) = args.subcommand_matches("rawtest") {
         rawtest(wrench, &mut window, rx.unwrap());
