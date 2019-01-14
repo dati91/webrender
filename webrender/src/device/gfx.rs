@@ -80,7 +80,7 @@ pub struct Locals {
     uMode: i32,
 }
 
-const MAX_FRAME_COUNT: usize = 2;
+const MAX_FRAME_COUNT: usize = 1;
 const DESCRIPTOR_COUNT: usize = 400;
 const DEBUG_DESCRIPTOR_COUNT: usize = 5;
 const DESCRIPTOR_SET_PER_DRAW: usize = 0;
@@ -1389,6 +1389,7 @@ impl<B: hal::Backend> Program<B> {
     }
 
     fn bind_texture(&mut self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, binding: &'static str) {
+        //println!("binding={:?} image.image={:?} ", binding, image.image);
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
@@ -1920,7 +1921,7 @@ impl<B: hal::Backend> Device<B> {
         let limits = adapter
             .physical_device
             .limits();
-        let max_texture_size = 4400u32; // TODO use limits after it points to the correct texture size
+        let max_texture_size = 8192u32; // Moz2D doesn't like textures bigger than this
 
         let (device, queue_group) = {
             let queue_family = adapter.queue_families
@@ -2495,6 +2496,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        //println!("self.bound_textures={:?}", self.bound_textures);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS[0..5].iter() {

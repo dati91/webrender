@@ -3361,7 +3361,7 @@ impl<B: hal::Backend> Renderer<B>
         self.device.disable_depth_write();
         self.set_blend(false, FramebufferKind::Other);
 
-        #[cfg(feature = "gleam")]
+        //#[cfg(feature = "gleam")]
         for rect in &target.clears {
             self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect));
         }
@@ -4760,7 +4760,7 @@ impl<B: hal::Backend> Renderer<B>
             let (t, gpu_cache_data) = Self::load_texture(
                 TextureTarget::Default,
                 &renderer.gpu_cache,
-                Some(RenderTargetInfo { has_depth: false }),
+                None,//Some(RenderTargetInfo { has_depth: false }),
                 &root,
                 &mut self.device,
             );

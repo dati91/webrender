@@ -55,6 +55,10 @@ name = "yuv"
 path = "yuv.rs"
 required-features = ["gl"]
 
+[[bin]]
+name = "test1"
+path = "test1.rs"
+
 [features]
 default = []
 debug = ["webrender/capture", "webrender/debugger", "webrender/profiler", "webrender/debug_renderer"]
@@ -66,8 +70,11 @@ vulkan = ["gfx-backend-vulkan", "gfx-hal"]
 
 [dependencies]
 app_units = "0.7"
+clap = { version = "2", features = ["yaml"] }
 env_logger = "0.5"
 euclid = "0.19"
+image = "0.19"
+yaml-rust = { git = "https://github.com/vvuk/yaml-rust", features = ["preserve_order"] }
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gleam = { version = "0.6", optional = true}
 glutin = { version = "0.18", optional = true }

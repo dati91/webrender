@@ -8,7 +8,7 @@
 )]
 
 extern crate env_logger;
-extern crate euclid;
+//extern crate euclid;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
 #[cfg(feature = "metal")]
@@ -206,7 +206,7 @@ pub fn main_wrapper<E: Example>(
         resource_override_path: res_path,
         precache_flags: E::PRECACHE_SHADER_FLAGS,
         device_pixel_ratio,
-        clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
+        clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
         //scatter_gpu_cache_updates: false,
         debug_flags: webrender::DebugFlags::ECHO_DRIVER_MESSAGES,
         ..options.unwrap_or(webrender::RendererOptions::default())
@@ -245,7 +245,7 @@ pub fn main_wrapper<E: Example>(
     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
     let mut txn = Transaction::new();
 
-    example.render(
+    /*example.render(
         &api,
         &mut builder,
         &mut txn,
@@ -259,9 +259,9 @@ pub fn main_wrapper<E: Example>(
         layout_size,
         builder.finalize(),
         true,
-    );
+    );*/
     txn.set_root_pipeline(pipeline_id);
-    txn.generate_frame();
+    //txn.generate_frame();
     api.send_transaction(document_id, txn);
 
     println!("Entering event loop");
@@ -355,7 +355,7 @@ pub fn main_wrapper<E: Example>(
             _ => return winit::ControlFlow::Continue,
         };
 
-        if custom_event {
+        if true { //custom_event {
             let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
 
             example.render(
